@@ -7,16 +7,18 @@
 
 namespace antithesis {
     struct Assertion {
-        bool failed;
-        bool reached;
         const char* message;
         const char* function_name;
         const char* file_name;
         const int line;
         std::string id;
+        bool reached;
+        bool false_seen;
+        bool true_seen;
 
         Assertion(const char* message, const char* function_name, const char* file_name, const int line) : 
-            failed(false), reached(false), message(message), function_name(function_name), file_name(file_name), line(line), id(std::string(message) + " in " + function_name) {
+            message(message), function_name(function_name), file_name(file_name), line(line), id(std::string(message) + " in " + function_name),
+            reached(false), false_seen(false), true_seen(false) {
             this->add_to_catalog();
         }
 
@@ -25,15 +27,19 @@ namespace antithesis {
         }
 
         [[clang::always_inline]] inline void check_assertion(bool cond) {
-            //(void)reached;  // Needed to cause registration to happen no matter what!
             if (!reached) {
                 printf("The assertion with ID `%s` was reached\n", id.c_str());
                 reached = true;  // TODO: is the race OK?  If not, use a static initialization instead
             }
 
-            if (!cond && !failed) {
-                printf("The assertion with ID `%s` failed: %s\n", id.c_str(), message);
-                failed = true;   // TODO: is the race OK?
+            if (!cond && !false_seen) {
+                printf("The assertion with ID `%s` saw its first false: %s\n", id.c_str(), message);
+                false_seen = true;   // TODO: is the race OK?
+            }
+
+            if (cond && !true_seen) {
+                printf("The assertion with ID `%s` saw its first true: %s\n", id.c_str(), message);
+                true_seen = true;   // TODO: is the race OK?
             }
         }
     };
@@ -77,10 +83,17 @@ namespace {
 
 #define FIXED_STRING_FROM_C_STR(s) (fixed_string<string_length(s)+1>::from_c_str(s))
 
-#define ALWAYS(cond, message) ( \
+#define ANTITHESIS_ASSERT_RAW(cond, message) ( \
     CatalogEntry< \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line() \
     >::assertion.check_assertion(cond) )
+
+#define ALWAYS(cond, message) ANTITHESIS_ASSERT_RAW(cond, message)
+#define ALWAYS_OR_UNREACHABLE(cond, message) ANTITHESIS_ASSERT_RAW(cond, message)
+#define SOMETIMES(cond, message) ANTITHESIS_ASSERT_RAW(cond, message)
+#define REACHABLE(cond, message) ANTITHESIS_ASSERT_RAW(cond, message)
+#define UNREACHABLE(cond, message) ANTITHESIS_ASSERT_RAW(cond, message)
+
