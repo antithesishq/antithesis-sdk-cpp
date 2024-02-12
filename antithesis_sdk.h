@@ -1,24 +1,31 @@
 #pragma once
 
 #include <cstdio>
+#include <cstdint>
 #include <string>
 #include <array>
 #include <source_location>
 
 namespace antithesis {
+    struct AssertionState {
+        uint8_t not_reached : 1;
+        uint8_t false_not_seen : 1;
+        uint8_t true_not_seen : 1;
+        uint8_t rest : 5;
+
+        AssertionState() : not_reached(true), false_not_seen(true), true_not_seen(true), rest(0)  {}
+    };
+
     struct Assertion {
+        AssertionState state;
         const char* message;
         const char* function_name;
         const char* file_name;
         const int line;
         std::string id;
-        bool reached;
-        bool false_seen;
-        bool true_seen;
 
         Assertion(const char* message, const char* function_name, const char* file_name, const int line) : 
-            message(message), function_name(function_name), file_name(file_name), line(line), id(std::string(message) + " in " + function_name),
-            reached(false), false_seen(false), true_seen(false) {
+            state(), message(message), function_name(function_name), file_name(file_name), line(line), id(std::string(message) + " in " + function_name) {
             this->add_to_catalog();
         }
 
@@ -27,19 +34,26 @@ namespace antithesis {
         }
 
         [[clang::always_inline]] inline void check_assertion(bool cond) {
-            if (!reached) {
+            if (__builtin_expect(state.not_reached || state.false_not_seen || state.true_not_seen, false)) {
+                check_assertion_internal(cond);
+            }
+        }
+
+        private:
+        void check_assertion_internal(bool cond) {
+            if (state.not_reached) {
                 printf("The assertion with ID `%s` was reached\n", id.c_str());
-                reached = true;  // TODO: is the race OK?  If not, use a static initialization instead
+                state.not_reached = false;  // TODO: is the race OK?  If not, use a static initialization instead
             }
 
-            if (!cond && !false_seen) {
+            if (!cond && state.false_not_seen) {
                 printf("The assertion with ID `%s` saw its first false: %s\n", id.c_str(), message);
-                false_seen = true;   // TODO: is the race OK?
+                state.false_not_seen = false;   // TODO: is the race OK?
             }
 
-            if (cond && !true_seen) {
+            if (cond && state.true_not_seen) {
                 printf("The assertion with ID `%s` saw its first true: %s\n", id.c_str(), message);
-                true_seen = true;   // TODO: is the race OK?
+                state.true_not_seen = false;   // TODO: is the race OK?
             }
         }
     };
