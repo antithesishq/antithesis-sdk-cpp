@@ -20,25 +20,35 @@ namespace antithesis {
         AssertionState() : not_reached(true), false_not_seen(true), true_not_seen(true), rest(0)  {}
     };
 
-    struct Details;
+    struct JSON;
 
-    typedef std::variant<std::string, double, Details> ValueType;
+    typedef std::variant<std::string, bool, int, double, const char*, JSON> ValueType;
 
-    struct Details : std::map<std::string, ValueType> {
-        Details( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
+    struct JSON : std::map<std::string, ValueType> {
+        JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
     };
 
-    static std::ostream& operator<<(std::ostream& out, const Details& details);
+    static std::ostream& operator<<(std::ostream& out, const JSON& details);
     static std::ostream& operator<<(std::ostream& out, const ValueType& value) {
         std::visit([&](auto&& arg)
         {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, std::string>) {
                 out << std::quoted(arg);
+            } else if constexpr (std::is_same_v<T, bool>) {
+                out << (arg ? "true" : "false");
+            } else if constexpr (std::is_same_v<T, int>) {
+                out << arg;
             } else if constexpr (std::is_same_v<T, double>) {
                 out << arg;
-            } else if constexpr (std::is_same_v<T, Details>) {
-                out << arg;
+            } else if constexpr (std::is_same_v<T, const char*>) {
+                out << std::quoted(arg);
+            } else if constexpr (std::is_same_v<T, JSON>) {
+                if (arg.empty()) {
+                    out << "null";
+                } else {
+                    out << arg;
+                }
             } else {
                 static_assert(false, "non-exhaustive visitor!");
             }
@@ -47,7 +57,7 @@ namespace antithesis {
         return out;
     }
 
-    static std::ostream& operator<<(std::ostream& out, const Details& details) {
+    static std::ostream& operator<<(std::ostream& out, const JSON& details) {
         out << "{ ";
 
         bool first = true;
@@ -63,32 +73,34 @@ namespace antithesis {
         return out;
     }
 
-
     struct Assertion {
         AssertionState state;
         const char* message;
         const char* function_name;
         const char* file_name;
         const int line;
+        const int column;
         std::string id;
 
-        Assertion(const char* message, const char* function_name, const char* file_name, const int line) : 
-            state(), message(message), function_name(function_name), file_name(file_name), line(line), id(std::string(message) + " in " + function_name) {
+        Assertion(const char* message, const char* function_name, const char* file_name, const int line, const int column) : 
+            state(), message(message), function_name(function_name), file_name(file_name), line(line), column(column),
+            id(std::string(message) + " in " + function_name) { // TODO: "id": "/src/glitch-grid/go/control.go|195|0",
             this->add_to_catalog();
         }
 
         void add_to_catalog() const {
             printf("There is an assertion with ID `%s` at %s:%d in `%s` with message: `%s`\n", id.c_str(), file_name, line, function_name, message);
+            emit_catalog();
         }
 
-        [[clang::always_inline]] inline void check_assertion(bool cond, const Details& details) {
+        [[clang::always_inline]] inline void check_assertion(bool cond, const JSON& details) {
             if (__builtin_expect(state.not_reached || state.false_not_seen || state.true_not_seen, false)) {
                 check_assertion_internal(cond, details);
             }
         }
 
         private:
-        void check_assertion_internal(bool cond, const Details& details) {
+        void check_assertion_internal(bool cond, const JSON& details) {
             if (state.not_reached) {
                 printf("The assertion with ID `%s` was reached\n", id.c_str());
                 print_details(details);
@@ -108,10 +120,45 @@ namespace antithesis {
             }
         }
 
-        void print_details(const Details& d) {
+        void print_details(const JSON& d) const {
             std::ostringstream out;
             out << d;
-            printf("Details: %s\n", out.str().c_str());
+            printf("JSON: %s\n", out.str().c_str());
+        }
+
+        void emit_catalog() const {
+            bool must_hit = true;
+            const char* assert_type = "every";
+            bool condition = false;
+
+            // These are always the same for catalog
+            bool hit = false;
+            bool expecting = true;
+            emit_assertion(hit, must_hit, expecting, assert_type, condition, {});
+        }
+
+        void emit_assertion(bool hit, bool must_hit, bool expecting, const char* assert_type, bool condition, const JSON& details) const {
+            JSON assertion{
+                {"antithesis_assert", JSON{
+                    {"hit", hit},
+                    {"must_hit", must_hit},
+                    {"assert_type", assert_type},
+                    {"expecting", expecting},
+                    {"category", ""},
+                    {"message", message},
+                    {"condition", condition},
+                    {"id", id},
+                    {"location", JSON{
+                        // {"classname", Don't know},
+                        {"function", function_name},
+                        {"filename", file_name},
+                        {"line", line},
+                        {"columnn", column},
+                    }},
+                    {"details", details},
+                }}
+            };
+            print_details(assertion);
         }
     };
 
@@ -144,10 +191,10 @@ namespace {
                 return l;
     }
 
-    template <fixed_string message, fixed_string file_name, fixed_string function_name, int line>
+    template <fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
     struct CatalogEntry {
         [[clang::always_inline]] static inline antithesis::Assertion create() {
-            return antithesis::Assertion(message.c_str(), function_name.c_str(), file_name.c_str(), line);
+            return antithesis::Assertion(message.c_str(), function_name.c_str(), file_name.c_str(), line, column);
         }
 
         static inline antithesis::Assertion assertion = create();
@@ -161,8 +208,9 @@ namespace {
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
-        std::source_location::current().line() \
-    >::assertion.check_assertion(cond, (antithesis::Details(__VA_ARGS__)) ) )
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(cond, (antithesis::JSON(__VA_ARGS__)) ) )
 
 #define ALWAYS(cond, message, ...) ANTITHESIS_ASSERT_RAW(cond, message, __VA_ARGS__)
 #define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(cond, message, __VA_ARGS__)
