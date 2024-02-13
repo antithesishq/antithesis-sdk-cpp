@@ -12,12 +12,11 @@
 
 namespace antithesis {
     struct AssertionState {
-        uint8_t not_reached : 1;
         uint8_t false_not_seen : 1;
         uint8_t true_not_seen : 1;
-        uint8_t rest : 5;
+        uint8_t rest : 6;
 
-        AssertionState() : not_reached(true), false_not_seen(true), true_not_seen(true), rest(0)  {}
+        AssertionState() : false_not_seen(true), true_not_seen(true), rest(0)  {}
     };
 
     struct JSON;
@@ -73,96 +72,133 @@ namespace antithesis {
         return out;
     }
 
-    struct Assertion {
-        AssertionState state;
-        const char* message;
+    enum AssertType {
+        EVERY,
+        SOME,
+        NONE
+    };
+
+    inline constexpr const char* get_assert_type(AssertType type) {
+        switch (type) {
+            case EVERY: return "every";
+            case SOME: return "some";
+            case NONE: return "none";
+        }
+    }
+
+    static const uint8_t MUST_HIT_FLAG = 0x4;
+
+    inline constexpr uint8_t get_assertion_config(AssertType type, bool must_hit) {
+        return static_cast<uint8_t>(type) | (must_hit ? MUST_HIT_FLAG : 0);
+    }
+    inline constexpr std::pair<AssertType, bool> from_assertion_config(uint8_t config) {
+        AssertType type = static_cast<AssertType>(config & (MUST_HIT_FLAG - 1));
+        bool must_hit = config & MUST_HIT_FLAG;
+        return std::make_pair(type, must_hit);
+    }
+
+    struct LocationInfo {
+        const char* class_name;
         const char* function_name;
         const char* file_name;
         const int line;
         const int column;
-        std::string id;
 
-        Assertion(const char* message, const char* function_name, const char* file_name, const int line, const int column) : 
-            state(), message(message), function_name(function_name), file_name(file_name), line(line), column(column),
-            id(std::string(message) + " in " + function_name) { // TODO: "id": "/src/glitch-grid/go/control.go|195|0",
+        JSON to_json() const {
+            return JSON{
+                {"classname", class_name},
+                {"function", function_name},
+                {"filename", file_name},
+                {"line", line},
+                {"columnn", column},
+            };
+        }
+    };
+
+    std::string make_key(const char* message, const LocationInfo& location_info) {
+        // TODO: revisit with better keys
+        std::ostringstream out;
+        out << location_info.file_name << "|" << location_info.line << "|" << location_info.column;
+        return out.str();
+    }
+
+    void assert_impl(const char* message, bool cond, const JSON& details, const LocationInfo& location_info,
+                    bool hit, bool must_hit, bool expecting, const char* assert_type) {
+        std::string id = make_key(message, location_info);
+
+        JSON assertion{
+            {"antithesis_assert", JSON{
+                {"hit", hit},
+                {"must_hit", must_hit},
+                {"assert_type", assert_type},
+                {"expecting", expecting},
+                {"category", ""},
+                {"message", message},
+                {"condition", cond},
+                {"id", id},
+                {"location", location_info.to_json()},
+                {"details", details},
+            }}
+        };
+        std::ostringstream out;
+        out << assertion;
+        printf("%s\n", out.str().c_str());
+    }
+
+    void assert_raw(const char* message, bool cond, const JSON& details, 
+                            const char* class_name, const char* function_name, const char* file_name, const int line, const int column,     
+                            bool hit, bool must_hit, bool expecting, const char* assert_type) {
+        LocationInfo location_info{ class_name, function_name, file_name, line, column };
+        assert_impl(message, cond, details, location_info, hit, must_hit, expecting, assert_type);
+    }
+
+    struct Assertion {
+        AssertionState state;
+        AssertType type;
+        bool must_hit;
+        const char* message;
+        LocationInfo location;
+
+        Assertion(const char* message, AssertType type, bool must_hit, LocationInfo&& location) : 
+            state(), type(type), must_hit(must_hit), message(message), location(std::move(location)) { 
             this->add_to_catalog();
         }
 
         void add_to_catalog() const {
-            printf("There is an assertion with ID `%s` at %s:%d in `%s` with message: `%s`\n", id.c_str(), file_name, line, function_name, message);
-            emit_catalog();
+            const bool condition = (type == NONE ? true : false);
+            const bool hit = false;
+            const char* assert_type = get_assert_type(type);
+            const bool expecting = true;
+            assert_impl(message, condition, {}, location, hit, must_hit, expecting, assert_type);
         }
 
         [[clang::always_inline]] inline void check_assertion(bool cond, const JSON& details) {
-            if (__builtin_expect(state.not_reached || state.false_not_seen || state.true_not_seen, false)) {
+            if (__builtin_expect(state.false_not_seen || state.true_not_seen, false)) {
                 check_assertion_internal(cond, details);
             }
         }
 
         private:
         void check_assertion_internal(bool cond, const JSON& details) {
-            if (state.not_reached) {
-                printf("The assertion with ID `%s` was reached\n", id.c_str());
-                print_details(details);
-                state.not_reached = false;  // TODO: is the race OK?  If not, use a static initialization instead
-            }
-
+            bool emit = false;
             if (!cond && state.false_not_seen) {
-                printf("The assertion with ID `%s` saw its first false: %s\n", id.c_str(), message);
-                print_details(details);
+                emit = true;
                 state.false_not_seen = false;   // TODO: is the race OK?
             }
 
             if (cond && state.true_not_seen) {
-                printf("The assertion with ID `%s` saw its first true: %s\n", id.c_str(), message);
-                print_details(details);
+                emit = true;
                 state.true_not_seen = false;   // TODO: is the race OK?
             }
-        }
-
-        void print_details(const JSON& d) const {
-            std::ostringstream out;
-            out << d;
-            printf("JSON: %s\n", out.str().c_str());
-        }
-
-        void emit_catalog() const {
-            bool must_hit = true;
-            const char* assert_type = "every";
-            bool condition = false;
-
-            // These are always the same for catalog
-            bool hit = false;
-            bool expecting = true;
-            emit_assertion(hit, must_hit, expecting, assert_type, condition, {});
-        }
-
-        void emit_assertion(bool hit, bool must_hit, bool expecting, const char* assert_type, bool condition, const JSON& details) const {
-            JSON assertion{
-                {"antithesis_assert", JSON{
-                    {"hit", hit},
-                    {"must_hit", must_hit},
-                    {"assert_type", assert_type},
-                    {"expecting", expecting},
-                    {"category", ""},
-                    {"message", message},
-                    {"condition", condition},
-                    {"id", id},
-                    {"location", JSON{
-                        // {"classname", Don't know},
-                        {"function", function_name},
-                        {"filename", file_name},
-                        {"line", line},
-                        {"columnn", column},
-                    }},
-                    {"details", details},
-                }}
-            };
-            print_details(assertion);
+            
+            if (emit) {
+                const bool hit = true;
+                const char* assert_type = get_assert_type(type);
+                const bool expecting = true;
+                assert_impl(message, cond, details, location, hit, must_hit, expecting, assert_type);
+            }
         }
     };
-
-
 }
 
 namespace {
@@ -191,10 +227,12 @@ namespace {
                 return l;
     }
 
-    template <fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
+    template <uint8_t config, fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
     struct CatalogEntry {
         [[clang::always_inline]] static inline antithesis::Assertion create() {
-            return antithesis::Assertion(message.c_str(), function_name.c_str(), file_name.c_str(), line, column);
+            antithesis::LocationInfo location{ "", function_name.c_str(), file_name.c_str(), line, column };
+            const auto [type, must_hit] = antithesis::from_assertion_config(config);
+            return antithesis::Assertion(message.c_str(), type, must_hit, std::move(location));
         }
 
         static inline antithesis::Assertion assertion = create();
@@ -203,8 +241,9 @@ namespace {
 
 #define FIXED_STRING_FROM_C_STR(s) (fixed_string<string_length(s)+1>::from_c_str(s))
 
-#define ANTITHESIS_ASSERT_RAW(cond, message, ...) ( \
+#define ANTITHESIS_ASSERT_RAW(type, must_hit, cond, message, ...) ( \
     CatalogEntry< \
+        antithesis::get_assertion_config(type, must_hit), \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
@@ -212,9 +251,9 @@ namespace {
         std::source_location::current().column() \
     >::assertion.check_assertion(cond, (antithesis::JSON(__VA_ARGS__)) ) )
 
-#define ALWAYS(cond, message, ...) ANTITHESIS_ASSERT_RAW(cond, message, __VA_ARGS__)
-#define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(cond, message, __VA_ARGS__)
-#define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(cond, message, __VA_ARGS__)
-#define REACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(cond, message, __VA_ARGS__)
-#define UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(cond, message, __VA_ARGS__)
+#define ALWAYS(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::EVERY, true, cond, message, __VA_ARGS__)
+#define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::EVERY, false, cond, message, __VA_ARGS__)
+#define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::SOME, true, cond, message, __VA_ARGS__)
+#define REACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, true, true, message, __VA_ARGS__)
+#define UNREACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, false, true, message, __VA_ARGS__)
 
