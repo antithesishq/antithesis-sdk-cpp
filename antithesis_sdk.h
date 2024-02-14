@@ -413,4 +413,5 @@ namespace {
 #define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::SOME, true, cond, message, __VA_ARGS__)
 #define REACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, true, true, message, __VA_ARGS__)
 #define UNREACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, false, true, message, __VA_ARGS__)
+
 #endif
