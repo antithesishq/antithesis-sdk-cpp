@@ -1,5 +1,14 @@
 #pragma once
 
+#ifdef NO_ANTITHESIS_SDK
+
+#define ALWAYS(cond, message, ...)
+#define ALWAYS_OR_UNREACHABLE(cond, message, ...)
+#define SOMETIMES(cond, message, ...)
+#define REACHABLE(message, ...)
+#define UNREACHABLE(message, ...)
+
+#else
 #include <cstdio>
 #include <cstdint>
 #include <string>
@@ -404,4 +413,4 @@ namespace {
 #define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::SOME, true, cond, message, __VA_ARGS__)
 #define REACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, true, true, message, __VA_ARGS__)
 #define UNREACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, false, true, message, __VA_ARGS__)
-
+#endif
