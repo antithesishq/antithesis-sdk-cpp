@@ -9,8 +9,154 @@
 #include <variant>
 #include <sstream>
 #include <iomanip>
+#include <dlfcn.h>
+#include <memory>
+#include <cstring>
+#include <cstdlib>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <random>
 
 namespace antithesis {
+    constexpr const char* const ERROR_LOG_LINE_PREFIX = "[* antithesis-sdk-cpp *]";
+    constexpr const char* LIB_PATH = "/usr/lib/libvoidstar.so";
+
+    struct LibHandler {
+        virtual ~LibHandler() = default;
+        virtual void output(const char* message) const = 0;
+        virtual uint64_t random() = 0;
+    };
+
+    struct AntithesisHandler : LibHandler {
+        void output(const char* message) const override {
+            fuzz_json_data(message, strlen(message));
+            fuzz_flush();
+        }
+
+        uint64_t random() override {
+            return fuzz_get_random();
+        }
+
+        static std::unique_ptr<AntithesisHandler> create() {
+            void* shared_lib = dlopen(LIB_PATH, RTLD_NOW);
+            if (!shared_lib) {
+                error("Can not load the Antithesis native library");
+                return nullptr;
+            }
+
+            void* fuzz_json_data = dlsym(shared_lib, "fuzz_json_data");
+            if (!fuzz_json_data) {
+                error("Can access symbol fuzz_json_data");
+                return nullptr;
+            }
+
+            void* fuzz_flush = dlsym(shared_lib, "fuzz_flush");
+            if (!fuzz_flush) {
+                error("Can access symbol fuzz_flush");
+                return nullptr;
+            }
+
+            void* fuzz_get_random = dlsym(shared_lib, "fuzz_get_random");
+            if (!fuzz_get_random) {
+                error("Can access symbol fuzz_get_random");
+                return nullptr;
+            }
+
+            return std::unique_ptr<AntithesisHandler>(new AntithesisHandler(
+                reinterpret_cast<fuzz_json_data_t>(fuzz_json_data),
+                reinterpret_cast<fuzz_flush_t>(fuzz_flush),
+                reinterpret_cast<fuzz_get_random_t>(fuzz_get_random)));
+        }
+
+    private:
+        typedef void (*fuzz_json_data_t)( const char* message, size_t length );
+        typedef void (*fuzz_flush_t)();
+        typedef uint64_t (*fuzz_get_random_t)();
+
+
+        fuzz_json_data_t fuzz_json_data;
+        fuzz_flush_t fuzz_flush;
+        fuzz_get_random_t fuzz_get_random;
+
+        AntithesisHandler(fuzz_json_data_t fuzz_json_data, fuzz_flush_t fuzz_flush, fuzz_get_random_t fuzz_get_random) :
+            fuzz_json_data(fuzz_json_data), fuzz_flush(fuzz_flush), fuzz_get_random(fuzz_get_random) {}
+
+        static void error(const char* message) {
+            fprintf(stderr, "%s %s: %s\n", ERROR_LOG_LINE_PREFIX, message, dlerror());
+        }
+    };
+
+    struct LocalHandler : LibHandler{
+        ~LocalHandler() {
+            if (file != nullptr) {
+                fclose(file);
+            }
+        }
+
+        void output(const char* message) const override {
+            if (file != nullptr) {
+                fprintf(file, "%s\n", message);
+            }
+        }
+
+        uint64_t random() override {
+            return distribution(gen);
+        }
+
+        static std::unique_ptr<LocalHandler> create() {
+            return std::unique_ptr<LocalHandler>(new LocalHandler(create_internal()));
+        }
+    private:
+        static constexpr const char* LOCAL_OUTPUT_ENVIRONMENT_VARIABLE = "ANTITHESIS_SDK_LOCAL_OUTPUT";
+
+        FILE* file;
+        std::random_device device;
+        std::mt19937_64 gen;
+        std::uniform_int_distribution<unsigned long long> distribution;
+
+        LocalHandler(FILE* file): file(file), device(), gen(device()), distribution() {
+        }
+
+        // If `localOutputEnvVar` is set to a non-empty path, attempt to open that path and truncate the file
+        // to serve as the log file of the local handler.
+        // Otherwise, we don't have a log file, and logging is a no-op in the local handler.
+        static FILE* create_internal() {
+            const char* path = std::getenv(LOCAL_OUTPUT_ENVIRONMENT_VARIABLE);
+            if (!path || !path[0]) {
+                return nullptr;
+            }
+
+            // Open the file for writing (create if needed and possible) and truncate it
+            FILE* file = fopen(path, "w");
+            if (file == nullptr) {
+                fprintf(stderr, "%s Failed to open path %s: %s\n", ERROR_LOG_LINE_PREFIX, path, strerror(errno));
+                return nullptr;
+            }
+            int ret = fchmod(fileno(file), 0644);
+            if (ret != 0) {
+                fprintf(stderr, "%s Failed to set permissions for path %s: %s\n", ERROR_LOG_LINE_PREFIX, path, strerror(errno));
+                return nullptr;
+            }
+
+            return file;
+        }
+    };
+
+    std::unique_ptr<LibHandler> init() {
+        struct stat stat_buf;
+        if (stat(LIB_PATH, &stat_buf) == 0) {
+            std::unique_ptr<LibHandler> tmp = AntithesisHandler::create();
+            if (!tmp) {
+                fprintf(stderr, "%s Failed to create handler for Antithesis library\n", ERROR_LOG_LINE_PREFIX);
+                exit(-1);
+            }
+            return tmp;
+        } else {
+            return LocalHandler::create();
+        }
+    }
+
     struct AssertionState {
         uint8_t false_not_seen : 1;
         uint8_t true_not_seen : 1;
@@ -124,6 +270,8 @@ namespace antithesis {
 
     void assert_impl(const char* message, bool cond, const JSON& details, const LocationInfo& location_info,
                     bool hit, bool must_hit, bool expecting, const char* assert_type) {
+        static auto lib_handler = init();
+
         std::string id = make_key(message, location_info);
 
         JSON assertion{
@@ -142,7 +290,7 @@ namespace antithesis {
         };
         std::ostringstream out;
         out << assertion;
-        printf("%s\n", out.str().c_str());
+        lib_handler->output(out.str().c_str());
     }
 
     void assert_raw(const char* message, bool cond, const JSON& details, 
