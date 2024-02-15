@@ -194,7 +194,8 @@ namespace antithesis {
             } else if constexpr (std::is_same_v<T, bool>) {
                 out << (arg ? "true" : "false");
             } else if constexpr (std::is_same_v<T, char>) {
-                out << arg;
+                char tmp[2] = {arg, '\0'};
+                out << std::quoted(tmp);
             } else if constexpr (std::is_same_v<T, int>) {
                 out << arg;
             } else if constexpr (std::is_same_v<T, uint64_t>) {
