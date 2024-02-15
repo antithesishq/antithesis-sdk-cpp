@@ -30,6 +30,7 @@
 namespace antithesis {
     constexpr const char* const ERROR_LOG_LINE_PREFIX = "[* antithesis-sdk-cpp *]";
     constexpr const char* LIB_PATH = "/usr/lib/libvoidstar.so";
+    constexpr const char* LOCAL_OUTPUT_ENVIRONMENT_VARIABLE = "ANTITHESIS_SDK_LOCAL_OUTPUT";
 
     struct LibHandler {
         virtual ~LibHandler() = default;
@@ -39,8 +40,10 @@ namespace antithesis {
 
     struct AntithesisHandler : LibHandler {
         void output(const char* message) const override {
-            fuzz_json_data(message, strlen(message));
-            fuzz_flush();
+            if (message != nullptr) {
+                fuzz_json_data(message, strlen(message));
+                fuzz_flush();
+            }
         }
 
         uint64_t random() override {
@@ -104,7 +107,7 @@ namespace antithesis {
         }
 
         void output(const char* message) const override {
-            if (file != nullptr) {
+            if (file != nullptr && message != nullptr) {
                 fprintf(file, "%s\n", message);
             }
         }
@@ -117,8 +120,6 @@ namespace antithesis {
             return std::unique_ptr<LocalHandler>(new LocalHandler(create_internal()));
         }
     private:
-        static constexpr const char* LOCAL_OUTPUT_ENVIRONMENT_VARIABLE = "ANTITHESIS_SDK_LOCAL_OUTPUT";
-
         FILE* file;
         std::random_device device;
         std::mt19937_64 gen;
@@ -145,6 +146,7 @@ namespace antithesis {
             int ret = fchmod(fileno(file), 0644);
             if (ret != 0) {
                 fprintf(stderr, "%s Failed to set permissions for path %s: %s\n", ERROR_LOG_LINE_PREFIX, path, strerror(errno));
+                fclose(file);
                 return nullptr;
             }
 
@@ -176,7 +178,7 @@ namespace antithesis {
 
     struct JSON;
 
-    typedef std::variant<std::string, bool, int, double, const char*, JSON> ValueType;
+    typedef std::variant<std::string, bool, char, int, uint64_t, float, double, const char*, JSON> ValueType;
 
     struct JSON : std::map<std::string, ValueType> {
         JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
@@ -191,7 +193,13 @@ namespace antithesis {
                 out << std::quoted(arg);
             } else if constexpr (std::is_same_v<T, bool>) {
                 out << (arg ? "true" : "false");
+            } else if constexpr (std::is_same_v<T, char>) {
+                out << arg;
             } else if constexpr (std::is_same_v<T, int>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, uint64_t>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, float>) {
                 out << arg;
             } else if constexpr (std::is_same_v<T, double>) {
                 out << arg;
@@ -241,15 +249,18 @@ namespace antithesis {
         }
     }
 
-    static const uint8_t MUST_HIT_FLAG = 0x4;
+    static const uint8_t MUST_HIT_FLAG = 0x80;
+    static const uint8_t EXPECTING_FLAG = 0x40;
 
-    inline constexpr uint8_t get_assertion_config(AssertType type, bool must_hit) {
-        return static_cast<uint8_t>(type) | (must_hit ? MUST_HIT_FLAG : 0);
+    inline constexpr uint8_t get_assertion_config(AssertType type, bool must_hit, bool expecting) {
+        return static_cast<uint8_t>(type) | (must_hit ? MUST_HIT_FLAG : 0) | (expecting ? EXPECTING_FLAG : 0);
     }
-    inline constexpr std::pair<AssertType, bool> from_assertion_config(uint8_t config) {
-        AssertType type = static_cast<AssertType>(config & (MUST_HIT_FLAG - 1));
+    inline constexpr std::tuple<AssertType, bool, bool> from_assertion_config(uint8_t config) {
         bool must_hit = config & MUST_HIT_FLAG;
-        return std::make_pair(type, must_hit);
+        bool expecting = config & EXPECTING_FLAG;
+        constexpr uint8_t mask = EXPECTING_FLAG - 1; // All bits below the flags
+        AssertType type = static_cast<AssertType>(config & mask);
+        return std::make_tuple(type, must_hit, expecting);
     }
 
     struct LocationInfo {
@@ -277,10 +288,14 @@ namespace antithesis {
         return out.str();
     }
 
-    void assert_impl(const char* message, bool cond, const JSON& details, const LocationInfo& location_info,
-                    bool hit, bool must_hit, bool expecting, const char* assert_type) {
+    LibHandler& get_lib_handler() {
         static auto lib_handler = init();
 
+        return *lib_handler.get();
+    }
+
+    void assert_impl(const char* message, bool cond, const JSON& details, const LocationInfo& location_info,
+                    bool hit, bool must_hit, bool expecting, const char* assert_type) {
         std::string id = make_key(message, location_info);
 
         JSON assertion{
@@ -299,7 +314,7 @@ namespace antithesis {
         };
         std::ostringstream out;
         out << assertion;
-        lib_handler->output(out.str().c_str());
+        get_lib_handler().output(out.str().c_str());
     }
 
     void assert_raw(const char* message, bool cond, const JSON& details, 
@@ -312,12 +327,13 @@ namespace antithesis {
     struct Assertion {
         AssertionState state;
         AssertType type;
-        bool must_hit;
+        bool must_hit; // If you never hit this assertion, does it pass or not? For example, ALWAYS -> must_hit = true, ALWAYS_OR_UNREACHABLE -> must_hit = false
+        bool expecting; // What value of <condition> indicates a pass? For example, ALWAYS -> expecting = true, NEVER -> expecting = false [note: NEVER doesn't exist currently]
         const char* message;
         LocationInfo location;
 
-        Assertion(const char* message, AssertType type, bool must_hit, LocationInfo&& location) : 
-            state(), type(type), must_hit(must_hit), message(message), location(std::move(location)) { 
+        Assertion(const char* message, AssertType type, bool must_hit, bool expecting, LocationInfo&& location) : 
+            state(), type(type), must_hit(must_hit), expecting(expecting), message(message), location(std::move(location)) { 
             this->add_to_catalog();
         }
 
@@ -325,7 +341,6 @@ namespace antithesis {
             const bool condition = (type == NONE ? true : false);
             const bool hit = false;
             const char* assert_type = get_assert_type(type);
-            const bool expecting = true;
             assert_impl(message, condition, {}, location, hit, must_hit, expecting, assert_type);
         }
 
@@ -351,11 +366,30 @@ namespace antithesis {
             if (emit) {
                 const bool hit = true;
                 const char* assert_type = get_assert_type(type);
-                const bool expecting = true;
                 assert_impl(message, cond, details, location, hit, must_hit, expecting, assert_type);
             }
         }
     };
+
+    uint64_t get_random() {
+        return get_lib_handler().random();
+    }
+
+    template <typename Iter>
+    Iter random_choice(Iter begin, Iter end) {
+        ssize_t num_things = end - begin;
+        if (num_things == 0) {
+            return end;
+        }
+
+        uint64_t uval = get_random();
+        ssize_t index = uval % num_things;
+        return begin + index;
+    }
+
+    void setup_complete() {
+        get_lib_handler().output(R"({"setup_status": "complete"})");
+    }
 }
 
 namespace {
@@ -388,8 +422,8 @@ namespace {
     struct CatalogEntry {
         [[clang::always_inline]] static inline antithesis::Assertion create() {
             antithesis::LocationInfo location{ "", function_name.c_str(), file_name.c_str(), line, column };
-            const auto [type, must_hit] = antithesis::from_assertion_config(config);
-            return antithesis::Assertion(message.c_str(), type, must_hit, std::move(location));
+            const auto [type, must_hit, expecting] = antithesis::from_assertion_config(config);
+            return antithesis::Assertion(message.c_str(), type, must_hit, expecting, std::move(location));
         }
 
         static inline antithesis::Assertion assertion = create();
@@ -398,9 +432,9 @@ namespace {
 
 #define FIXED_STRING_FROM_C_STR(s) (fixed_string<string_length(s)+1>::from_c_str(s))
 
-#define ANTITHESIS_ASSERT_RAW(type, must_hit, cond, message, ...) ( \
+#define ANTITHESIS_ASSERT_RAW(type, must_hit, expecting, cond, message, ...) ( \
     CatalogEntry< \
-        antithesis::get_assertion_config(type, must_hit), \
+        antithesis::get_assertion_config(type, must_hit, expecting), \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
@@ -408,10 +442,11 @@ namespace {
         std::source_location::current().column() \
     >::assertion.check_assertion(cond, (antithesis::JSON(__VA_ARGS__)) ) )
 
-#define ALWAYS(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::EVERY, true, cond, message, __VA_ARGS__)
-#define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::EVERY, false, cond, message, __VA_ARGS__)
-#define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::SOME, true, cond, message, __VA_ARGS__)
-#define REACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, true, true, message, __VA_ARGS__)
-#define UNREACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, false, true, message, __VA_ARGS__)
+#define ALWAYS(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::EVERY, true, true, cond, message, __VA_ARGS__)
+#define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::EVERY, false, true, cond, message, __VA_ARGS__)
+#define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::SOME, true, true, cond, message, __VA_ARGS__)
+#define REACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, true, true, true, message, __VA_ARGS__)
+#define UNREACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::NONE, false, true, true, message, __VA_ARGS__)
 
 #endif
+
