@@ -1,6 +1,27 @@
 #pragma once
 
-#ifdef NO_ANTITHESIS_SDK
+#include <cstdint>
+#include <random>
+
+namespace antithesis {
+    struct LocalRandom {
+        std::random_device device;
+        std::mt19937_64 gen;
+        std::uniform_int_distribution<unsigned long long> distribution;
+
+        LocalRandom() : device(), gen(device()), distribution() {}
+
+        uint64_t random() {
+            return distribution(gen);
+        }
+    };
+}
+
+#if defined(NO_ANTITHESIS_SDK) || __cplusplus < 202000L
+
+#if __cplusplus < 202000L
+    #error "The Antithesis C++ API requires C++20 or higher"
+#endif
 
 #define ALWAYS(cond, message, ...)
 #define ALWAYS_OR_UNREACHABLE(cond, message, ...)
@@ -8,9 +29,24 @@
 #define REACHABLE(message, ...)
 #define UNREACHABLE(message, ...)
 
+
+namespace antithesis {
+    inline uint64_t get_random() {
+#ifdef ANTITHESIS_RANDOM_OVERRIDE
+        return ANTITHESIS_RANDOM_OVERRIDE();
 #else
+        static LocalRandom random_gen;
+        return random_gen.random();
+#endif        
+    }
+
+    inline void setup_complete() {
+    }
+}
+
+#else
+
 #include <cstdio>
-#include <cstdint>
 #include <string>
 #include <array>
 #include <source_location>
@@ -25,7 +61,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <random>
 
 namespace antithesis {
     constexpr const char* const ERROR_LOG_LINE_PREFIX = "[* antithesis-sdk-cpp *]";
@@ -113,7 +148,7 @@ namespace antithesis {
         }
 
         uint64_t random() override {
-            return distribution(gen);
+            return random_gen.random();
         }
 
         static std::unique_ptr<LocalHandler> create() {
@@ -121,11 +156,9 @@ namespace antithesis {
         }
     private:
         FILE* file;
-        std::random_device device;
-        std::mt19937_64 gen;
-        std::uniform_int_distribution<unsigned long long> distribution;
+        LocalRandom random_gen;
 
-        LocalHandler(FILE* file): file(file), device(), gen(device()), distribution() {
+        LocalHandler(FILE* file): file(file), random_gen() {
         }
 
         // If `localOutputEnvVar` is set to a non-empty path, attempt to open that path and truncate the file
@@ -376,18 +409,6 @@ namespace antithesis {
         return get_lib_handler().random();
     }
 
-    template <typename Iter>
-    Iter random_choice(Iter begin, Iter end) {
-        ssize_t num_things = end - begin;
-        if (num_things == 0) {
-            return end;
-        }
-
-        uint64_t uval = get_random();
-        ssize_t index = uval % num_things;
-        return begin + index;
-    }
-
     void setup_complete() {
         get_lib_handler().output(R"({"setup_status": "complete"})");
     }
@@ -451,3 +472,16 @@ namespace {
 
 #endif
 
+namespace antithesis {
+    template <typename Iter>
+    Iter random_choice(Iter begin, Iter end) {
+        ssize_t num_things = end - begin;
+        if (num_things == 0) {
+            return end;
+        }
+
+        uint64_t uval = get_random();
+        ssize_t index = uval % num_things;
+        return begin + index;
+    }
+}
