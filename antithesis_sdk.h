@@ -1,5 +1,9 @@
 #pragma once
 
+// This header file contains the Antithesis C++ SDK, which enables C++ applications to integrate with the [Antithesis platform].
+//
+// Documentation for the SDK is found at https://antithesis.com/docs/using_antithesis/sdk/cpp_sdk.html.
+
 #include <cstdint>
 #include <random>
 
