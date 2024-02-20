@@ -12,7 +12,11 @@ namespace antithesis {
         LocalRandom() : device(), gen(device()), distribution() {}
 
         uint64_t random() {
+#ifdef ANTITHESIS_RANDOM_OVERRIDE
+            return ANTITHESIS_RANDOM_OVERRIDE();
+#else
             return distribution(gen);
+#endif
         }
     };
 }
@@ -32,12 +36,8 @@ namespace antithesis {
 
 namespace antithesis {
     inline uint64_t get_random() {
-#ifdef ANTITHESIS_RANDOM_OVERRIDE
-        return ANTITHESIS_RANDOM_OVERRIDE();
-#else
         static LocalRandom random_gen;
         return random_gen.random();
-#endif        
     }
 
     inline void setup_complete() {
