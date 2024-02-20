@@ -217,6 +217,9 @@ namespace antithesis {
         JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
     };
 
+    template<class>
+    inline constexpr bool always_false_v = false;
+
     static std::ostream& operator<<(std::ostream& out, const JSON& details);
     static std::ostream& operator<<(std::ostream& out, const ValueType& value) {
         std::visit([&](auto&& arg)
@@ -246,7 +249,7 @@ namespace antithesis {
                     out << arg;
                 }
             } else {
-                static_assert(false, "non-exhaustive visitor!");
+                static_assert(always_false_v<T>, "non-exhaustive visitor!");
             }
         }, value);
 
