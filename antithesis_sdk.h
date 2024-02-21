@@ -1,5 +1,9 @@
 #pragma once
 
+// This header file contains the Antithesis C++ SDK, which enables C++ applications to integrate with the [Antithesis platform].
+//
+// Documentation for the SDK is found at https://antithesis.com/docs/using_antithesis/sdk/cpp_sdk.html.
+
 #include <cstdint>
 #include <random>
 
@@ -12,7 +16,11 @@ namespace antithesis {
         LocalRandom() : device(), gen(device()), distribution() {}
 
         uint64_t random() {
+#ifdef ANTITHESIS_RANDOM_OVERRIDE
+            return ANTITHESIS_RANDOM_OVERRIDE();
+#else
             return distribution(gen);
+#endif
         }
     };
 }
@@ -32,12 +40,8 @@ namespace antithesis {
 
 namespace antithesis {
     inline uint64_t get_random() {
-#ifdef ANTITHESIS_RANDOM_OVERRIDE
-        return ANTITHESIS_RANDOM_OVERRIDE();
-#else
         static LocalRandom random_gen;
         return random_gen.random();
-#endif        
     }
 
     inline void setup_complete() {
@@ -217,6 +221,9 @@ namespace antithesis {
         JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
     };
 
+    template<class>
+    inline constexpr bool always_false_v = false;
+
     static std::ostream& operator<<(std::ostream& out, const JSON& details);
     static std::ostream& operator<<(std::ostream& out, const ValueType& value) {
         std::visit([&](auto&& arg)
@@ -246,7 +253,7 @@ namespace antithesis {
                     out << arg;
                 }
             } else {
-                static_assert(false, "non-exhaustive visitor!");
+                static_assert(always_false_v<T>, "non-exhaustive visitor!");
             }
         }, value);
 
