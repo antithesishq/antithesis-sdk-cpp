@@ -23,12 +23,18 @@ namespace antithesis {
 #endif
         }
     };
+
+    // Declarations that we expose
+    uint64_t get_random();
 }
 
-#if defined(NO_ANTITHESIS_SDK) || __cplusplus < 202000L
+#if defined(NO_ANTITHESIS_SDK) || __cplusplus < 202000L || (defined(__clang__) && __clang_major__ < 16)
 
 #if __cplusplus < 202000L
     #error "The Antithesis C++ API requires C++20 or higher"
+#endif
+#if defined(__clang__) && __clang_major__ < 16
+    #error "The Antithesis C++ API requires clang version 16 or higher"
 #endif
 
 #define ALWAYS(cond, message, ...)
@@ -139,7 +145,7 @@ namespace antithesis {
     };
 
     struct LocalHandler : LibHandler{
-        ~LocalHandler() {
+        ~LocalHandler() override {
             if (file != nullptr) {
                 fclose(file);
             }
@@ -191,7 +197,7 @@ namespace antithesis {
         }
     };
 
-    std::unique_ptr<LibHandler> init() {
+    static std::unique_ptr<LibHandler> init() {
         struct stat stat_buf;
         if (stat(LIB_PATH, &stat_buf) == 0) {
             std::unique_ptr<LibHandler> tmp = AntithesisHandler::create();
@@ -322,20 +328,20 @@ namespace antithesis {
         }
     };
 
-    std::string make_key(const char* message, const LocationInfo& location_info) {
+    inline std::string make_key([[maybe_unused]] const char* message, const LocationInfo& location_info) {
         // TODO: revisit with better keys
         std::ostringstream out;
         out << location_info.file_name << "|" << location_info.line << "|" << location_info.column;
         return out.str();
     }
 
-    LibHandler& get_lib_handler() {
-        static auto lib_handler = init();
+    inline LibHandler& get_lib_handler() {
+        static LibHandler* lib_handler = init().release(); // Leak on exit, rather than exit-time-destructor
 
-        return *lib_handler.get();
+        return *lib_handler;
     }
 
-    void assert_impl(const char* message, bool cond, const JSON& details, const LocationInfo& location_info,
+    inline void assert_impl(const char* message, bool cond, const JSON& details, const LocationInfo& location_info,
                     bool hit, bool must_hit, bool expecting, const char* assert_type) {
         std::string id = make_key(message, location_info);
 
@@ -358,7 +364,7 @@ namespace antithesis {
         get_lib_handler().output(out.str().c_str());
     }
 
-    void assert_raw(const char* message, bool cond, const JSON& details, 
+    inline void assert_raw(const char* message, bool cond, const JSON& details, 
                             const char* class_name, const char* function_name, const char* file_name, const int line, const int column,     
                             bool hit, bool must_hit, bool expecting, const char* assert_type) {
         LocationInfo location_info{ class_name, function_name, file_name, line, column };
@@ -412,11 +418,11 @@ namespace antithesis {
         }
     };
 
-    uint64_t get_random() {
+    inline uint64_t get_random() {
         return get_lib_handler().random();
     }
 
-    void setup_complete() {
+    inline void setup_complete() {
         get_lib_handler().output(R"({"setup_status": "complete"})");
     }
 }
@@ -426,26 +432,38 @@ namespace {
     struct fixed_string {
         std::array<char, N> contents;
         constexpr fixed_string() {
-            for(int i=0; i<N; i++) contents[i] = 0;
+            for(unsigned int i=0; i<N; i++) contents[i] = 0;
         }
+
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
         constexpr fixed_string( const char (&arr)[N] )
         {
-            for(int i=0; i<N; i++) contents[i] = arr[i];
+            for(unsigned int i=0; i<N; i++) contents[i] = arr[i];
         }
-        static constexpr fixed_string from_c_str( const char* foo ) {
+
+        static constexpr fixed_string<N> from_c_str( const char* s ) {
             fixed_string<N> it;
-            for(int i=0; i<N && foo[i]; i++)
-                it.contents[i] = foo[i];
+            for(unsigned int i=0; i<N && s[i]; i++)
+                it.contents[i] = s[i];
             return it;
         }
+        #pragma clang diagnostic pop
+
         const char* c_str() const { return contents.data(); }
     };
 
+    template <std::size_t N>
+    fixed_string( const char (&arr)[N] ) -> fixed_string<N>;
+
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
     static constexpr size_t string_length( const char * s ) {
         for(int l = 0; ; l++)
             if (!s[l])
                 return l;
     }
+    #pragma clang diagnostic pop
 
     template <uint8_t config, fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
     struct CatalogEntry {
