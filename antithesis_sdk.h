@@ -341,7 +341,7 @@ namespace antithesis {
         return *lib_handler;
     }
 
-    inline void assert_impl(const char* message, bool cond, const JSON& details, const LocationInfo& location_info,
+    inline void assert_impl(bool cond, const char* message, const JSON& details, const LocationInfo& location_info,
                     bool hit, bool must_hit, bool expecting, const char* assert_type) {
         std::string id = make_key(message, location_info);
 
@@ -364,11 +364,11 @@ namespace antithesis {
         get_lib_handler().output(out.str().c_str());
     }
 
-    inline void assert_raw(const char* message, bool cond, const JSON& details, 
+    inline void assert_raw(bool cond, const char* message, const JSON& details, 
                             const char* class_name, const char* function_name, const char* file_name, const int line, const int column,     
                             bool hit, bool must_hit, bool expecting, const char* assert_type) {
         LocationInfo location_info{ class_name, function_name, file_name, line, column };
-        assert_impl(message, cond, details, location_info, hit, must_hit, expecting, assert_type);
+        assert_impl(cond, message, details, location_info, hit, must_hit, expecting, assert_type);
     }
 
     struct Assertion {
@@ -388,7 +388,7 @@ namespace antithesis {
             const bool condition = (type == NONE ? true : false);
             const bool hit = false;
             const char* assert_type = get_assert_type(type);
-            assert_impl(message, condition, {}, location, hit, must_hit, expecting, assert_type);
+            assert_impl(condition, message, {}, location, hit, must_hit, expecting, assert_type);
         }
 
         [[clang::always_inline]] inline void check_assertion(bool cond, const JSON& details) {
@@ -413,7 +413,7 @@ namespace antithesis {
             if (emit) {
                 const bool hit = true;
                 const char* assert_type = get_assert_type(type);
-                assert_impl(message, cond, details, location, hit, must_hit, expecting, assert_type);
+                assert_impl(cond, message, details, location, hit, must_hit, expecting, assert_type);
             }
         }
     };
