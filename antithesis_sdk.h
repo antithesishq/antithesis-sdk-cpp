@@ -350,7 +350,7 @@ namespace antithesis {
                 {"function", function_name},
                 {"file", file_name},
                 {"begin_line", line},
-                {"begin_columnn", column},
+                {"begin_column", column},
             };
         }
     };
