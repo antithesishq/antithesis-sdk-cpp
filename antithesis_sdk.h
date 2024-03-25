@@ -9,9 +9,11 @@
 #include <string>
 #include <map>
 #include <variant>
+#include <vector>
 
 namespace antithesis {
-    inline const char* VERSION = "0.1.0";
+    inline const char* SDK_VERSION = "0.2.1";
+    inline const char* PROTOCOL_VERSION = "1.0.0";
 
     struct LocalRandom {
         std::random_device device;
@@ -31,7 +33,26 @@ namespace antithesis {
 
     struct JSON;
 
-    typedef std::variant<std::string, bool, char, int, uint64_t, float, double, const char*, JSON> ValueType;
+    typedef std::variant<
+      std::string,
+      bool,
+      char,
+      int,
+      uint64_t,
+      float,
+      double,
+      const char*,
+      JSON,
+      std::vector<std::string>,
+      std::vector<bool>,
+      std::vector<char>,
+      std::vector<int>,
+      std::vector<uint64_t>,
+      std::vector<float>,
+      std::vector<double>,
+      std::vector<const char *>,
+      std::vector<JSON>
+    > ValueType;
 
     struct JSON : std::map<std::string, ValueType> {
         JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
@@ -264,6 +285,106 @@ namespace antithesis {
                 out << arg;
             } else if constexpr (std::is_same_v<T, const char*>) {
                 out << std::quoted(arg);
+            } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << std::quoted(item);
+                }
+                out << ']';
+            } else if constexpr (std::is_same_v<T, std::vector<bool>>) {
+                out << '[';
+                bool first = true;
+                for (bool item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << (item ? "true" : "false");
+                }
+                out << ']';
+            } else if constexpr (std::is_same_v<T, std::vector<char>>) {
+                out << '[';
+                bool first = true;
+                for (char item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  char tmp[2] = {item, '\0'};
+                  out << std::quoted(tmp);
+                }
+                out << ']';
+            } else if constexpr (std::is_same_v<T, std::vector<int>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << item;
+                }
+                out << ']';
+            } else if constexpr (std::is_same_v<T, std::vector<uint64_t>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << item;
+                }
+                out << ']';
+            } else if constexpr (std::is_same_v<T, std::vector<float>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << item;
+                }
+                out << ']';
+            } else if constexpr (std::is_same_v<T, std::vector<double>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << item;
+                }
+                out << ']';
+            } else if constexpr (std::is_same_v<T, std::vector<const char *>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << std::quoted(item);
+                }
+                out << ']';
+            } else if constexpr (std::is_same_v<T, std::vector<JSON>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << item;
+                }
+                out << ']';
             } else if constexpr (std::is_same_v<T, JSON>) {
                 if (arg.empty()) {
                     out << "null";
@@ -364,10 +485,16 @@ namespace antithesis {
         if (lib_handler == nullptr) {
             lib_handler = init().release(); // Leak on exit, rather than exit-time-destructor
 
+            JSON language_block{
+              {"name", "C++"},
+              {"version", __VERSION__}
+            };
+
             JSON version_message{
                 {"antithesis_sdk", JSON{
-                    {"language", "C++"},
-                    {"version", VERSION}
+                    {"language", language_block},
+                    {"sdk_version", SDK_VERSION},
+                    {"protocol_version", PROTOCOL_VERSION}
                 }
             }};
             lib_handler->output(version_message);
@@ -423,6 +550,9 @@ namespace antithesis {
         }
 
         [[clang::always_inline]] inline void check_assertion(bool cond, const JSON& details) {
+            #if defined(NO_ANTITHESIS_SDK)
+              #error "Antithesis SDK has been disabled"
+            #endif
             if (__builtin_expect(state.false_not_seen || state.true_not_seen, false)) {
                 check_assertion_internal(cond, details);
             }
