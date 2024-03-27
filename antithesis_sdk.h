@@ -33,7 +33,7 @@ namespace antithesis {
 
     struct JSON;
     typedef std::variant<std::string, bool, char, int, uint64_t, float, double, const char*, JSON> BasicValueType;
-    typedef std::vector<antithesis::BasicValueType> JSON_ARRAY;
+    typedef std::vector<BasicValueType> JSON_ARRAY;
     typedef std::variant<BasicValueType, JSON_ARRAY> ValueType;
 
     struct JSON : std::map<std::string, ValueType> {
