@@ -9,9 +9,11 @@
 #include <string>
 #include <map>
 #include <variant>
+#include <vector>
 
 namespace antithesis {
-    inline const char* VERSION = "0.1.0";
+    inline const char* SDK_VERSION = "0.2.1";
+    inline const char* PROTOCOL_VERSION = "1.0.0";
 
     struct LocalRandom {
         std::random_device device;
@@ -30,8 +32,9 @@ namespace antithesis {
     };
 
     struct JSON;
-
-    typedef std::variant<std::string, bool, char, int, uint64_t, float, double, const char*, JSON> ValueType;
+    typedef std::variant<std::string, bool, char, int, uint64_t, float, double, const char*, JSON> BasicValueType;
+    typedef std::vector<BasicValueType> JSON_ARRAY;
+    typedef std::variant<BasicValueType, JSON_ARRAY> ValueType;
 
     struct JSON : std::map<std::string, ValueType> {
         JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
@@ -243,7 +246,7 @@ namespace antithesis {
     template<class>
     inline constexpr bool always_false_v = false;
 
-    static std::ostream& operator<<(std::ostream& out, const ValueType& value) {
+    static std::ostream& operator<<(std::ostream& out, const BasicValueType& basic_value) {
         std::visit([&](auto&& arg)
         {
             using T = std::decay_t<decltype(arg)>;
@@ -271,7 +274,32 @@ namespace antithesis {
                     out << arg;
                 }
             } else {
-                static_assert(always_false_v<T>, "non-exhaustive visitor!");
+                static_assert(always_false_v<T>, "non-exhaustive BasicValueType visitor!");
+            }
+        }, basic_value);
+
+        return out;
+    }
+
+    static std::ostream& operator<<(std::ostream& out, const ValueType& value) {
+        std::visit([&](auto&& arg)
+        {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, BasicValueType>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, std::vector<BasicValueType>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << item;
+                }
+                out << ']';
+            } else {
+                static_assert(always_false_v<T>, "non-exhaustive ValueType visitor!");
             }
         }, value);
 
@@ -364,10 +392,16 @@ namespace antithesis {
         if (lib_handler == nullptr) {
             lib_handler = init().release(); // Leak on exit, rather than exit-time-destructor
 
+            JSON language_block{
+              {"name", "C++"},
+              {"version", __VERSION__}
+            };
+
             JSON version_message{
                 {"antithesis_sdk", JSON{
-                    {"language", "C++"},
-                    {"version", VERSION}
+                    {"language", language_block},
+                    {"sdk_version", SDK_VERSION},
+                    {"protocol_version", PROTOCOL_VERSION}
                 }
             }};
             lib_handler->output(version_message);
@@ -423,6 +457,9 @@ namespace antithesis {
         }
 
         [[clang::always_inline]] inline void check_assertion(bool cond, const JSON& details) {
+            #if defined(NO_ANTITHESIS_SDK)
+              #error "Antithesis SDK has been disabled"
+            #endif
             if (__builtin_expect(state.false_not_seen || state.true_not_seen, false)) {
                 check_assertion_internal(cond, details);
             }
