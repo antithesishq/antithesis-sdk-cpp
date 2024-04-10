@@ -1,35 +1,10 @@
-# antithesis-sdk-cpp.nix
-
 {stdenv, pkgs}:
-# let
-# in
   with pkgs;
   stdenv.mkDerivation {
     pname = "antithesis-sdk-cpp";
-    version = "0.1.1";
+    version = "0.2.2";
 
     src = ./.;
-
-    nativeBuildInputs = [
-      clang_17
-      cmake
-    ];
-
-    # buildInputs = [];
-
-    configurePhase = ''
-      cmake .
-    '';
-
-    # patchPhase = '' '';
-
-    buildPhase = ''
-      #env
-      make antithesis-sdk-cpp
-      #ls -lR 
-    '';
-
-    # checkPhase = '' '';
 
     installPhase = ''
       mkdir -p $out/include
