@@ -606,13 +606,13 @@ void load_libvoidstar() {
 
     void* trace_pc_guard_init_sym = dlsym(shared_lib, "__sanitizer_cov_trace_pc_guard_init");
     if (!trace_pc_guard_init_sym) {
-        message_out("Can access trace_pc_guard symbol __sanitizer_cov_trace_pc_guard_init\n");
+        message_out("Can not forward calls to libvoidstar for __sanitizer_cov_trace_pc_guard_init\n");
         return;
     }
 
     void* trace_pc_guard_sym = dlsym(shared_lib, "__sanitizer_cov_trace_pc_guard");
     if (!trace_pc_guard_sym) {
-        message_out("Can access trace_pc_guard symbol __sanitizer_cov_trace_pc_guard\n");
+        message_out("Can not forward calls to libvoidstar for __sanitizer_cov_trace_pc_guard\n");
         return;
     }
 
@@ -628,7 +628,7 @@ void load_libvoidstar() {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wreserved-identifier"
 extern "C" void __sanitizer_cov_trace_pc_guard_init(uint32_t *start, uint32_t *stop) {
-    message_out("STUB: __sanitizer_cov_trace_pc_guard_init()\n");
+    message_out("SDK forwarding to libvoidstar for __sanitizer_cov_trace_pc_guard_init()\n");
     if (!did_check_libvoidstar) {
         load_libvoidstar();
     }
