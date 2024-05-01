@@ -25,12 +25,12 @@ static trace_pc_guard_fn trace_pc_guard = NULL;
 static bool did_check_libvoidstar = false;
 static bool has_libvoidstar = false;
 
-static void message_out(const char *msg) {
-  (void)write(1, msg, strlen(msg));
+static void debug_message_out(const char *msg) {
+  //(void)write(1, msg, strlen(msg));
   return;
 }
 
-static void load_libvoidstar() {
+extern void antithesis_load_libvoidstar() {
 #ifdef __cplusplus
     constexpr
 #endif
@@ -42,19 +42,19 @@ static void load_libvoidstar() {
     did_check_libvoidstar = true;
     void* shared_lib = dlopen(LIB_PATH, RTLD_NOW);
     if (!shared_lib) {
-        message_out("Can not load the Antithesis native library\n");
+        debug_message_out("Can not load the Antithesis native library\n");
         return;
     }
 
     void* trace_pc_guard_init_sym = dlsym(shared_lib, "__sanitizer_cov_trace_pc_guard_init");
     if (!trace_pc_guard_init_sym) {
-        message_out("Can not forward calls to libvoidstar for __sanitizer_cov_trace_pc_guard_init\n");
+        debug_message_out("Can not forward calls to libvoidstar for __sanitizer_cov_trace_pc_guard_init\n");
         return;
     }
 
     void* trace_pc_guard_sym = dlsym(shared_lib, "__sanitizer_cov_trace_pc_guard");
     if (!trace_pc_guard_sym) {
-        message_out("Can not forward calls to libvoidstar for __sanitizer_cov_trace_pc_guard\n");
+        debug_message_out("Can not forward calls to libvoidstar for __sanitizer_cov_trace_pc_guard\n");
         return;
     }
 
@@ -74,9 +74,9 @@ extern
     "C"
 #endif
 void __sanitizer_cov_trace_pc_guard_init(uint32_t *start, uint32_t *stop) {
-    message_out("SDK forwarding to libvoidstar for __sanitizer_cov_trace_pc_guard_init()\n");
+    debug_message_out("SDK forwarding to libvoidstar for __sanitizer_cov_trace_pc_guard_init()\n");
     if (!did_check_libvoidstar) {
-        load_libvoidstar();
+        antithesis_load_libvoidstar();
     }
     if (has_libvoidstar) {
         trace_pc_guard_init(start, stop);
