@@ -1,10 +1,14 @@
 #pragma once
 
-// This header file contains the instrumentation part of the Antithesis C++ SDK.
-// This header file (but not the remainder of the SDK) can be used in either C or C++ programs. You should include it in *a single*
-// .cpp or .c file to add instrumentation to your project (there are also compiler command-line arguments to set).
-//
-// Documentation for the SDK, including how to use this is found at https://antithesis.com/docs/using_antithesis/sdk/cpp_sdk.html.
+/*
+This header file enables code coverage instrumentation. It is distributed with the Antithesis C++ SDK.
+
+This header file can be used in both C and C++ programs. (The rest of the SDK works only for C++ programs.)
+
+You should include it in a single .cpp or .c file.
+
+The instructions (such as required compiler flags) and usage guidance are found at https://antithesis.com/docs/using_antithesis/sdk/cpp_sdk.html.
+*/
 
 #include <unistd.h>
 #include <string.h>
