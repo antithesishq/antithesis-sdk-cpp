@@ -35,7 +35,11 @@ static __attribute__((no_sanitize("coverage"))) void debug_message_out(const cha
   return;
 }
 
-extern  __attribute__((no_sanitize("coverage"))) void antithesis_load_libvoidstar() {
+extern
+#ifdef __cplusplus
+    "C"
+#endif
+__attribute__((no_sanitize("coverage"))) void antithesis_load_libvoidstar() {
 #ifdef __cplusplus
     constexpr
 #endif
