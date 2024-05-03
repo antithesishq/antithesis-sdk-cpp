@@ -64,8 +64,8 @@ extern  __attribute__((no_sanitize("coverage"))) void antithesis_load_libvoidsta
         return;
     }
 
-    trace_pc_guard_init = reinterpret_cast<trace_pc_guard_init_fn>(trace_pc_guard_init_sym);
-    trace_pc_guard = reinterpret_cast<trace_pc_guard_fn>(trace_pc_guard_sym);
+    trace_pc_guard_init = (trace_pc_guard_init_fn)(trace_pc_guard_init_sym);
+    trace_pc_guard = (trace_pc_guard_fn)(trace_pc_guard_sym);
     has_libvoidstar = true;
     debug_message_out("LOADED libvoidstar");
 }
@@ -97,7 +97,7 @@ extern
 #endif
 void __sanitizer_cov_trace_pc_guard( uint32_t *guard ) {
     if (has_libvoidstar) {
-        auto edge = reinterpret_cast<uint64_t>(__builtin_return_address(0));
+        uint64_t edge = (uint64_t)(__builtin_return_address(0));
         trace_pc_guard(guard, edge);
     } else {
         if (guard) {
