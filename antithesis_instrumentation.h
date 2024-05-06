@@ -62,7 +62,7 @@ __attribute__((no_sanitize("coverage"))) void antithesis_load_libvoidstar() {
         return;
     }
 
-    void* trace_pc_guard_sym = dlsym(shared_lib, "trace_pc_guard_sdk");
+    void* trace_pc_guard_sym = dlsym(shared_lib, "__sanitizer_cov_trace_pc_guard_internal");
     if (!trace_pc_guard_sym) {
         debug_message_out("Can not forward calls to libvoidstar for __sanitizer_cov_trace_pc_guard");
         return;
