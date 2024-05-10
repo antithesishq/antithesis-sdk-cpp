@@ -4,8 +4,28 @@
 //
 // Documentation for the SDK is found at https://antithesis.com/docs/using_antithesis/sdk/cpp_sdk.html.
 
+#if __cplusplus < 202000L
+    #error "The Antithesis C++ API requires C++20 or higher"
+    #ifndef NO_ANTITHESIS_SDK
+        #define NO_ANTITHESIS_SDK
+    #endif
+#endif
+
+#if defined(__clang__) && __clang_major__ < 16
+    #error "The Antithesis C++ API requires clang version 16 or higher"
+
+    #ifndef NO_ANTITHESIS_SDK
+        #define NO_ANTITHESIS_SDK
+    #endif
+#endif
+
+
+
+/*****************************************************************************
+ * COMMON
+ *****************************************************************************/
+
 #include <cstdint>
-#include <random>
 #include <string>
 #include <map>
 #include <variant>
@@ -15,6 +35,25 @@ namespace antithesis {
     inline const char* SDK_VERSION = "0.3.0";
     inline const char* PROTOCOL_VERSION = "1.0.0";
 
+    struct JSON;
+    typedef std::variant<std::string, bool, char, int, uint64_t, float, double, const char*, JSON> BasicValueType;
+    typedef std::vector<BasicValueType> JSON_ARRAY;
+    typedef std::variant<BasicValueType, JSON_ARRAY> ValueType;
+
+    struct JSON : std::map<std::string, ValueType> {
+        JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
+    };
+}
+
+
+/*****************************************************************************
+ * INTERNAL HELPERS: LOCAL RANDOM
+ * Used in both the NO_ANTITHESIS_SDK version and when running locally
+ *****************************************************************************/
+
+#include <random>
+
+namespace antithesis::internal::random {
     struct LocalRandom {
         std::random_device device;
         std::mt19937_64 gen;
@@ -30,57 +69,112 @@ namespace antithesis {
 #endif
         }
     };
-
-    struct JSON;
-    typedef std::variant<std::string, bool, char, int, uint64_t, float, double, const char*, JSON> BasicValueType;
-    typedef std::vector<BasicValueType> JSON_ARRAY;
-    typedef std::variant<BasicValueType, JSON_ARRAY> ValueType;
-
-    struct JSON : std::map<std::string, ValueType> {
-        JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
-    };
-
-    // Declarations that we expose
-    uint64_t get_random();
 }
 
-#if defined(NO_ANTITHESIS_SDK) || __cplusplus < 202000L || (defined(__clang__) && __clang_major__ < 16)
+/*****************************************************************************
+ * INTERNAL HELPERS: JSON
+ *****************************************************************************/
 
-#if __cplusplus < 202000L
-    #error "The Antithesis C++ API requires C++20 or higher"
-#endif
-#if defined(__clang__) && __clang_major__ < 16
-    #error "The Antithesis C++ API requires clang version 16 or higher"
-#endif
+#ifndef NO_ANTITHESIS_SDK
 
-#define ALWAYS(cond, message, ...)
-#define ALWAYS_OR_UNREACHABLE(cond, message, ...)
-#define SOMETIMES(cond, message, ...)
-#define REACHABLE(message, ...)
-#define UNREACHABLE(message, ...)
+#include <array>
+#include <iomanip>
 
+namespace antithesis::internal::json {
+    template<class>
+    inline constexpr bool always_false_v = false;
 
-namespace antithesis {
-    inline uint64_t get_random() {
-        static LocalRandom random_gen;
-        return random_gen.random();
+    static std::ostream& operator<<(std::ostream& out, const JSON& details);
+
+    static std::ostream& operator<<(std::ostream& out, const BasicValueType& basic_value) {
+        std::visit([&](auto&& arg)
+        {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, std::string>) {
+                out << std::quoted(arg);
+            } else if constexpr (std::is_same_v<T, bool>) {
+                out << (arg ? "true" : "false");
+            } else if constexpr (std::is_same_v<T, char>) {
+                char tmp[2] = {arg, '\0'};
+                out << std::quoted(tmp);
+            } else if constexpr (std::is_same_v<T, int>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, uint64_t>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, float>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, double>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, const char*>) {
+                out << std::quoted(arg);
+            } else if constexpr (std::is_same_v<T, JSON>) {
+                if (arg.empty()) {
+                    out << "null";
+                } else {
+                    out << arg;
+                }
+            } else {
+                static_assert(always_false_v<T>, "non-exhaustive BasicValueType visitor!");
+            }
+        }, basic_value);
+
+        return out;
     }
 
-    inline void setup_complete(const JSON& details) {
+    static std::ostream& operator<<(std::ostream& out, const ValueType& value) {
+        std::visit([&](auto&& arg)
+        {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, BasicValueType>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, std::vector<BasicValueType>>) {
+                out << '[';
+                bool first = true;
+                for (auto &item : arg) {
+                  if (!first) {
+                    out << ',';
+                  }
+                  first = false;
+                  out << item;
+                }
+                out << ']';
+            } else {
+                static_assert(always_false_v<T>, "non-exhaustive ValueType visitor!");
+            }
+        }, value);
+
+        return out;
     }
 
-    inline void send_event(const char* name, const JSON& details) {
+    static std::ostream& operator<<(std::ostream& out, const JSON& details) {
+        out << "{ ";
+
+        bool first = true;
+        for (auto [key, value] : details) {
+            if (!first) {
+                out << ", ";
+            }
+            out << std::quoted(key) << ": " << value;
+            first = false;
+        }
+
+        out << " }";
+        return out;
     }
 }
 
-#else
+#endif
+
+/*****************************************************************************
+ * INTERNAL HELPERS: HANDLERS
+ * Implementations for running locally and running in Antithesis
+ *****************************************************************************/
+
+#ifndef NO_ANTITHESIS_SDK
 
 #include <cstdio>
-#include <array>
-#include <source_location>
 #include <iostream>
 #include <sstream>
-#include <iomanip>
 #include <dlfcn.h>
 #include <memory>
 #include <cstring>
@@ -89,13 +183,14 @@ namespace antithesis {
 #include <unistd.h>
 #include <sys/stat.h>
 
-namespace antithesis {
+
+namespace antithesis::internal::handlers {
     constexpr const char* const ERROR_LOG_LINE_PREFIX = "[* antithesis-sdk-cpp *]";
     constexpr const char* LIB_PATH = "/usr/lib/libvoidstar.so";
     constexpr const char* LOCAL_OUTPUT_ENVIRONMENT_VARIABLE = "ANTITHESIS_SDK_LOCAL_OUTPUT";
-    
-    static std::ostream& operator<<(std::ostream& out, const JSON& details);
 
+    using namespace antithesis::internal::json;
+    
     struct LibHandler {
         virtual ~LibHandler() = default;
         virtual void output(const char* message) const = 0;
@@ -191,7 +286,7 @@ namespace antithesis {
         }
     private:
         FILE* file;
-        LocalRandom random_gen;
+        antithesis::internal::random::LocalRandom random_gen;
 
         LocalHandler(FILE* file): file(file), random_gen() {
         }
@@ -236,6 +331,39 @@ namespace antithesis {
         }
     }
 
+    inline LibHandler& get_lib_handler() {
+        static LibHandler* lib_handler = nullptr;
+        if (lib_handler == nullptr) {
+            lib_handler = init().release(); // Leak on exit, rather than exit-time-destructor
+
+            JSON language_block{
+              {"name", "C++"},
+              {"version", __VERSION__}
+            };
+
+            JSON version_message{
+                {"antithesis_sdk", JSON{
+                    {"language", language_block},
+                    {"sdk_version", SDK_VERSION},
+                    {"protocol_version", PROTOCOL_VERSION}
+                }
+            }};
+            lib_handler->output(version_message);
+        }
+
+        return *lib_handler;
+    }
+}
+
+#endif
+
+/*****************************************************************************
+ * INTERNAL HELPERS: Various classes related to assertions
+ *****************************************************************************/
+
+#ifndef NO_ANTITHESIS_SDK
+
+namespace antithesis::internal::assertions {
     struct AssertionState {
         uint8_t false_not_seen : 1;
         uint8_t true_not_seen : 1;
@@ -243,85 +371,6 @@ namespace antithesis {
 
         AssertionState() : false_not_seen(true), true_not_seen(true), rest(0)  {}
     };
-
-    template<class>
-    inline constexpr bool always_false_v = false;
-
-    static std::ostream& operator<<(std::ostream& out, const BasicValueType& basic_value) {
-        std::visit([&](auto&& arg)
-        {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, std::string>) {
-                out << std::quoted(arg);
-            } else if constexpr (std::is_same_v<T, bool>) {
-                out << (arg ? "true" : "false");
-            } else if constexpr (std::is_same_v<T, char>) {
-                char tmp[2] = {arg, '\0'};
-                out << std::quoted(tmp);
-            } else if constexpr (std::is_same_v<T, int>) {
-                out << arg;
-            } else if constexpr (std::is_same_v<T, uint64_t>) {
-                out << arg;
-            } else if constexpr (std::is_same_v<T, float>) {
-                out << arg;
-            } else if constexpr (std::is_same_v<T, double>) {
-                out << arg;
-            } else if constexpr (std::is_same_v<T, const char*>) {
-                out << std::quoted(arg);
-            } else if constexpr (std::is_same_v<T, JSON>) {
-                if (arg.empty()) {
-                    out << "null";
-                } else {
-                    out << arg;
-                }
-            } else {
-                static_assert(always_false_v<T>, "non-exhaustive BasicValueType visitor!");
-            }
-        }, basic_value);
-
-        return out;
-    }
-
-    static std::ostream& operator<<(std::ostream& out, const ValueType& value) {
-        std::visit([&](auto&& arg)
-        {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, BasicValueType>) {
-                out << arg;
-            } else if constexpr (std::is_same_v<T, std::vector<BasicValueType>>) {
-                out << '[';
-                bool first = true;
-                for (auto &item : arg) {
-                  if (!first) {
-                    out << ',';
-                  }
-                  first = false;
-                  out << item;
-                }
-                out << ']';
-            } else {
-                static_assert(always_false_v<T>, "non-exhaustive ValueType visitor!");
-            }
-        }, value);
-
-        return out;
-    }
-
-    static std::ostream& operator<<(std::ostream& out, const JSON& details) {
-        out << "{ ";
-
-        bool first = true;
-        for (auto [key, value] : details) {
-            if (!first) {
-                out << ", ";
-            }
-            out << std::quoted(key) << ": " << value;
-            first = false;
-        }
-
-        out << " }";
-        return out;
-    }
 
     enum AssertionType {
         ALWAYS_ASSERTION,
@@ -388,29 +437,6 @@ namespace antithesis {
         return message;
     }
 
-    inline LibHandler& get_lib_handler() {
-        static LibHandler* lib_handler = nullptr;
-        if (lib_handler == nullptr) {
-            lib_handler = init().release(); // Leak on exit, rather than exit-time-destructor
-
-            JSON language_block{
-              {"name", "C++"},
-              {"version", __VERSION__}
-            };
-
-            JSON version_message{
-                {"antithesis_sdk", JSON{
-                    {"language", language_block},
-                    {"sdk_version", SDK_VERSION},
-                    {"protocol_version", PROTOCOL_VERSION}
-                }
-            }};
-            lib_handler->output(version_message);
-        }
-
-        return *lib_handler;
-    }
-
     inline void assert_impl(bool cond, const char* message, const JSON& details, const LocationInfo& location_info,
                     bool hit, bool must_hit, const char* assert_type, const char* display_type, const char* id) {
         JSON assertion{
@@ -426,7 +452,7 @@ namespace antithesis {
                 {"details", details},
             }}
         };
-        get_lib_handler().output(assertion);
+        antithesis::internal::handlers::get_lib_handler().output(assertion);
     }
 
     inline void assert_raw(bool cond, const char* message, const JSON& details, 
@@ -489,28 +515,10 @@ namespace antithesis {
             }
         }
     };
-
-    inline uint64_t get_random() {
-        return get_lib_handler().random();
-    }
-
-    inline void setup_complete(const JSON& details) {
-        JSON json{ 
-            { "antithesis_setup", JSON{ 
-                {"status", "complete"}, 
-                {"details", details}
-            }} 
-        };
-        get_lib_handler().output(json);
-    }
-
-    inline void send_event(const char* name, const JSON& details) {
-        JSON json = { { name, details } };
-        get_lib_handler().output(json);
-    }
 }
 
-namespace {
+namespace antithesis::internal {
+namespace { // Anonymous namespace which is translation-unit-specific; certain symbols aren't exposed in the symbol table as a result
     template <std::size_t N>
     struct fixed_string {
         std::array<char, N> contents;
@@ -548,34 +556,115 @@ namespace {
     }
     #pragma clang diagnostic pop
 
-    template <antithesis::AssertionType type, fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
+    template <antithesis::internal::assertions::AssertionType type, fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
     struct CatalogEntry {
-        [[clang::always_inline]] static inline antithesis::Assertion create() {
-            antithesis::LocationInfo location{ "", function_name.c_str(), file_name.c_str(), line, column };
-            return antithesis::Assertion(message.c_str(), type, std::move(location));
+        [[clang::always_inline]] static inline antithesis::internal::assertions::Assertion create() {
+            antithesis::internal::assertions::LocationInfo location{ "", function_name.c_str(), file_name.c_str(), line, column };
+            return antithesis::internal::assertions::Assertion(message.c_str(), type, std::move(location));
         }
 
-        static inline antithesis::Assertion assertion = create();
+        static inline antithesis::internal::assertions::Assertion assertion = create();
     };
 }
+}
 
-#define FIXED_STRING_FROM_C_STR(s) (fixed_string<string_length(s)+1>::from_c_str(s))
+#endif
+
+/*****************************************************************************
+ * PUBLIC SDK: ASSERTIONS
+ *****************************************************************************/
+
+#ifdef NO_ANTITHESIS_SDK
+
+#define ALWAYS(cond, message, ...)
+#define ALWAYS_OR_UNREACHABLE(cond, message, ...)
+#define SOMETIMES(cond, message, ...)
+#define REACHABLE(message, ...)
+#define UNREACHABLE(message, ...)
+
+#else
+
+#include <source_location>
+
+#define FIXED_STRING_FROM_C_STR(s) (antithesis::internal::fixed_string<antithesis::internal::string_length(s)+1>::from_c_str(s))
 
 #define ANTITHESIS_ASSERT_RAW(type, cond, message, ...) ( \
-    CatalogEntry< \
+    antithesis::internal::CatalogEntry< \
         type, \
-        fixed_string(message), \
+        antithesis::internal::fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
     >::assertion.check_assertion(cond, (antithesis::JSON(__VA_ARGS__)) ) )
 
-#define ALWAYS(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::ALWAYS_ASSERTION, cond, message, __VA_ARGS__)
-#define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::ALWAYS_OR_UNREACHABLE_ASSERTION, cond, message, __VA_ARGS__)
-#define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::SOMETIMES_ASSERTION, cond, message, __VA_ARGS__)
-#define REACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::REACHABLE_ASSERTION, true, message, __VA_ARGS__)
-#define UNREACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::UNREACHABLE_ASSERTION, false, message, __VA_ARGS__)
+#define ALWAYS(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::ALWAYS_ASSERTION, cond, message, __VA_ARGS__)
+#define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::ALWAYS_OR_UNREACHABLE_ASSERTION, cond, message, __VA_ARGS__)
+#define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::SOMETIMES_ASSERTION, cond, message, __VA_ARGS__)
+#define REACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::REACHABLE_ASSERTION, true, message, __VA_ARGS__)
+#define UNREACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::UNREACHABLE_ASSERTION, false, message, __VA_ARGS__)
+
+#endif
+
+/*****************************************************************************
+ * PUBLIC SDK: LIFECYCLE
+ *****************************************************************************/
+
+#ifdef NO_ANTITHESIS_SDK
+
+namespace antithesis {
+    inline void setup_complete(const JSON& details) {
+    }
+
+    inline void send_event(const char* name, const JSON& details) {
+    }
+}
+
+#else
+
+namespace antithesis {
+    inline void setup_complete(const JSON& details) {
+        JSON json{ 
+            { "antithesis_setup", JSON{ 
+                {"status", "complete"}, 
+                {"details", details}
+            }} 
+        };
+        antithesis::internal::handlers::get_lib_handler().output(json);
+    }
+
+    inline void send_event(const char* name, const JSON& details) {
+        JSON json = { { name, details } };
+        antithesis::internal::handlers::get_lib_handler().output(json);
+    }
+}
+#endif
+
+/*****************************************************************************
+ * PUBLIC SDK: RANDOM
+ *****************************************************************************/
+
+namespace antithesis {
+    // Declarations that we expose
+    uint64_t get_random();
+}
+
+#ifdef NO_ANTITHESIS_SDK
+
+namespace antithesis {
+    inline uint64_t get_random() {
+        static antithesis::internal::random::LocalRandom random_gen;
+        return random_gen.random();
+    }
+}
+
+#else
+
+namespace antithesis {
+    inline uint64_t get_random() {
+        return antithesis::internal::handlers::get_lib_handler().random();
+    }
+}
 
 #endif
 
