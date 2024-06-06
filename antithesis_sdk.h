@@ -13,7 +13,7 @@
 #include <vector>
 
 namespace antithesis {
-    inline const char* SDK_VERSION = "0.3.0";
+    inline const char* SDK_VERSION = "0.3.1";
     inline const char* PROTOCOL_VERSION = "1.0.0";
 
     struct LocalRandom {
