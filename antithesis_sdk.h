@@ -444,11 +444,8 @@ namespace antithesis {
     }
 
     inline CatalogEntryTracker& get_catalog_entry_tracker() {
-        static CatalogEntryTracker* catalog_entry_tracker = nullptr;
-        if (catalog_entry_tracker == nullptr) {
-            catalog_entry_tracker = init_tracker().release(); // Leak on exit, rather than exit-time-destructor
-        }
-        return *catalog_entry_tracker;
+        static CatalogEntryTracker catalog_entry_tracker;
+        return catalog_entry_tracker;
     }
 
     struct Assertion {
