@@ -439,10 +439,6 @@ namespace antithesis {
 
     typedef std::set<std::string> CatalogEntryTracker;
 
-    static std::unique_ptr<CatalogEntryTracker> init_tracker() {
-        return std::unique_ptr<CatalogEntryTracker>(new CatalogEntryTracker);
-    }
-
     inline CatalogEntryTracker& get_catalog_entry_tracker() {
         static CatalogEntryTracker catalog_entry_tracker;
         return catalog_entry_tracker;
