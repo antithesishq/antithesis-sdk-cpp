@@ -60,9 +60,13 @@ namespace antithesis {
 #define REACHABLE(message, ...)
 #define UNREACHABLE(message, ...)
 #define ALWAYS_GREATER_THAN(val, threshold, message, ...)
+#define ALWAYS_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...)
 #define SOMETIMES_GREATER_THAN(val, threshold, message, ...)
+#define SOMETIMES_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...)
 #define ALWAYS_LESS_THAN(val, threshold, message, ...)
+#define ALWAYS_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...)
 #define SOMETIMES_LESS_THAN(val, threshold, message, ...)
+#define SOMETIMES_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...)
 #define ALWAYS_SOME(pairs, message, ...)
 #define NEVER_ALL(pairs, message, ...)
 #define SOMETIMES_ALL(pairs, message, ...)
@@ -743,9 +747,37 @@ do { \
     >::guidepost.send_guidance(left - right); \
 } while (0)
 
+#define ALWAYS_GREATER_THAN_OR_EQUAL_TO(left, right, message, ...) \
+do { \
+    ALWAYS(left >= right, message, __VA_ARGS__); \
+    GuidanceCatalogEntry< \
+        decltype(left), \
+        antithesis::GUIDEPOST_MINIMIZE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(left - right); \
+} while (0)
+
 #define SOMETIMES_GREATER_THAN(left, right, message, ...) \
 do { \
     SOMETIMES(left > right, message, __VA_ARGS__); \
+    GuidanceCatalogEntry< \
+        decltype(left), \
+        antithesis::GUIDEPOST_MAXIMIZE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(left - right); \
+} while (0)
+
+#define SOMETIMES_GREATER_THAN_OR_EQUAL_TO(left, right, message, ...) \
+do { \
+    SOMETIMES(left >= right, message, __VA_ARGS__); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MAXIMIZE, \
@@ -771,6 +803,20 @@ do { \
     >::guidepost.send_guidance(left - right); \
 } while (0)
 
+#define ALWAYS_LESS_THAN_OR_EQUAL_TO(left, right, message, ...) \
+do { \
+    ALWAYS(left <= right, message, __VA_ARGS__); \
+    GuidanceCatalogEntry< \
+        decltype(left), \
+        antithesis::GUIDEPOST_MAXIMIZE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(left - right); \
+} while (0)
+
 #define SOMETIMES_LESS_THAN(left, right, message, ...) \
 do { \
     SOMETIMES(left < right, message, __VA_ARGS__); \
@@ -785,6 +831,19 @@ do { \
     >::guidepost.send_guidance(left - right); \
 } while (0)
 
+#define SOMETIMES_LESS_THAN_OR_EQUAL_TO(left, right, message, ...) \
+do { \
+    SOMETIMES(left <= right, message, __VA_ARGS__); \
+    GuidanceCatalogEntry< \
+        decltype(left), \
+        antithesis::GUIDEPOST_MINIMIZE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(left - right); \
+} while (0)
 #define ALWAYS_SOME(pairs, message, ...) \
 do { \
     bool disjunction = false; \
