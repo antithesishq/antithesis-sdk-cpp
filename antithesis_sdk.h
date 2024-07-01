@@ -59,7 +59,13 @@ namespace antithesis {
 #define SOMETIMES(cond, message, ...)
 #define REACHABLE(message, ...)
 #define UNREACHABLE(message, ...)
-
+#define ALWAYS_GREATER_THAN(val, threshold, message, ...)
+#define SOMETIMES_GREATER_THAN(val, threshold, message, ...)
+#define ALWAYS_LESS_THAN(val, threshold, message, ...)
+#define SOMETIMES_LESS_THAN(val, threshold, message, ...)
+#define ALWAYS_SOME(pairs, message, ...)
+#define NEVER_ALL(pairs, message, ...)
+#define SOMETIMES_ALL(pairs, message, ...)
 
 namespace antithesis {
     inline uint64_t get_random() {
@@ -520,6 +526,121 @@ namespace antithesis {
         JSON json = { { name, details } };
         get_lib_handler().output(json);
     }
+
+    enum GuidepostType {
+        GUIDEPOST_MAXIMIZE,
+        GUIDEPOST_MINIMIZE,
+        GUIDEPOST_EXPLORE,
+        GUIDEPOST_ALL,
+        GUIDEPOST_NONE
+    };
+
+    inline constexpr const char* get_guidance_type_string(GuidepostType type) {
+        switch (type) {
+            case GUIDEPOST_MAXIMIZE:
+            case GUIDEPOST_MINIMIZE:
+                return "numeric";
+            case GUIDEPOST_ALL:
+            case GUIDEPOST_NONE:
+                return "boolean";
+            case GUIDEPOST_EXPLORE:
+                return "json";
+        }
+    }
+
+    inline constexpr bool does_guidance_maximize(GuidepostType type) {
+        switch (type) {
+            case GUIDEPOST_MAXIMIZE:
+            case GUIDEPOST_ALL:
+                return true;
+            case GUIDEPOST_EXPLORE:
+            case GUIDEPOST_MINIMIZE:
+            case GUIDEPOST_NONE:
+                return false;
+        }
+    }
+
+    template <typename T>
+    struct IGuidepost {
+        const char* message;
+        LocationInfo location;
+        GuidepostType type;
+
+        IGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
+            message(message), location(std::move(location)), type(type) {
+                this->add_to_catalog();
+            }
+
+        inline void add_to_catalog() {
+            std::string id = make_key(message, location);
+            JSON catalog{
+                {"antithesis_guidance", JSON{
+                    {"guidance_type", get_guidance_type_string(type)},
+                    {"message", message},
+                    {"id", id},
+                    {"location", location.to_json()},
+                    {"maximize", does_guidance_maximize(type)},
+                    {"hit", false}
+                }}
+            };
+            get_lib_handler().output(catalog);
+        }
+
+        inline void send_guidance(T data) {
+            std::string id = make_key(message, location);
+            JSON guidance{
+                {"antithesis_guidance", JSON{
+                    {"guidance_type", get_guidance_type_string(type)},
+                    {"message", message},
+                    {"id", id},
+                    {"location", location.to_json()},
+                    {"maximize", does_guidance_maximize(type)},
+                    {"guidance_data", data},
+                    {"hit", true}
+                }}
+            };
+            get_lib_handler().output(guidance);
+        }
+    };
+
+    template <typename Value>
+    struct NumericGuidepost : IGuidepost<Value> {
+        Value extreme_value;
+
+        NumericGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
+            IGuidepost<Value>(message, std::move(location), type) {
+                if (type == GUIDEPOST_MAXIMIZE) {
+                    extreme_value = std::numeric_limits<Value>::min(); 
+                } else {
+                    extreme_value = std::numeric_limits<Value>::max();
+                }
+            }
+
+        bool should_send_value(Value value) {
+            if (this->type == GUIDEPOST_MAXIMIZE) {
+                return value > extreme_value;
+            } else {
+                return value < extreme_value;
+            }
+        }
+
+        [[clang::always_inline]] inline void send_guidance(Value value) {
+            if (should_send_value(value)) {
+                extreme_value = value;
+                IGuidepost<Value>::send_guidance(value);
+            }
+        }   
+    };
+
+    template <typename GuidanceType>
+    struct BooleanGuidepost : IGuidepost<GuidanceType> {
+        BooleanGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
+            IGuidepost<GuidanceType>(message, std::move(location), type) {}
+
+        [[clang::always_inline]] inline void send_guidance(GuidanceType data) {
+            IGuidepost<GuidanceType>::send_guidance(data);
+        }
+    };
 }
 
 namespace {
@@ -569,6 +690,25 @@ namespace {
 
         static inline antithesis::Assertion assertion = create();
     };
+
+    template<typename GuidanceDataType, antithesis::GuidepostType type, fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
+    struct GuidanceCatalogEntry {
+        [[clang::always_inline]] static inline antithesis::IGuidepost<GuidanceDataType> create() {
+            antithesis::LocationInfo location{ "", function_name.c_str(), file_name.c_str(), line, column };
+            switch (type) {
+                case antithesis::GUIDEPOST_MAXIMIZE:
+                case antithesis::GUIDEPOST_MINIMIZE:
+                    return antithesis::NumericGuidepost<GuidanceDataType>(message.c_str(), std::move(location), type);
+                case antithesis::GUIDEPOST_ALL:
+                case antithesis::GUIDEPOST_NONE:
+                    return antithesis::BooleanGuidepost<GuidanceDataType>(message.c_str(), std::move(location), type);
+                case antithesis::GUIDEPOST_EXPLORE:
+                    throw std::runtime_error("explore guidance is not supported");
+            }
+        }
+        
+        static inline antithesis::IGuidepost<GuidanceDataType> guidepost = create();
+    };
 }
 
 #define FIXED_STRING_FROM_C_STR(s) (fixed_string<string_length(s)+1>::from_c_str(s))
@@ -588,6 +728,128 @@ namespace {
 #define SOMETIMES(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::SOMETIMES_ASSERTION, cond, message, __VA_ARGS__)
 #define REACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::REACHABLE_ASSERTION, true, message, __VA_ARGS__)
 #define UNREACHABLE(message, ...) ANTITHESIS_ASSERT_RAW(antithesis::UNREACHABLE_ASSERTION, false, message, __VA_ARGS__)
+
+#define ALWAYS_GREATER_THAN(left, right, message, ...) \
+do { \
+    ALWAYS(left > right, message, __VA_ARGS__); \
+    GuidanceCatalogEntry< \
+        decltype(left), \
+        antithesis::GUIDEPOST_MINIMIZE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(left - right); \
+} while (0)
+
+#define SOMETIMES_GREATER_THAN(left, right, message, ...) \
+do { \
+    SOMETIMES(left > right, message, __VA_ARGS__); \
+    GuidanceCatalogEntry< \
+        decltype(left), \
+        antithesis::GUIDEPOST_MAXIMIZE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(left - right); \
+} while (0)
+
+#define ALWAYS_LESS_THAN(left, right, message, ...) \
+do { \
+    ALWAYS(left < right, message, __VA_ARGS__); \
+    GuidanceCatalogEntry< \
+        decltype(left), \
+        antithesis::GUIDEPOST_MAXIMIZE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(left - right); \
+} while (0)
+
+#define SOMETIMES_LESS_THAN(left, right, message, ...) \
+do { \
+    SOMETIMES(left < right, message, __VA_ARGS__); \
+    GuidanceCatalogEntry< \
+        decltype(left), \
+        antithesis::GUIDEPOST_MINIMIZE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(left - right); \
+} while (0)
+
+#define ALWAYS_SOME(pairs, message, ...) \
+do { \
+    bool disjunction = false; \
+    for (std::pair<std::string, bool> pair : pairs) { \
+        if (pair.second) { \
+            disjunction = true; \
+            break; \
+        } \
+    } \
+    ALWAYS(disjunction, message, __VA_ARGS__); \
+    antithesis::json json_pairs = antithesis::json(pairs); \
+    GuidanceCatalogEntry< \
+        decltype(json_pairs), \
+        antithesis::GUIDEPOST_NONE, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(json_pairs); \
+} while (0)
+
+#define NEVER_ALL(pairs, message, ...) \
+do { \
+    bool conjunction = true; \
+    for (std::pair<std::string, bool> pair : pairs) { \
+        if (!pair.second) { \
+            conjunction = false; \
+            break; \
+        } \
+    } \
+    ALWAYS(!conjunction, message, __VA_ARGS__); \
+    antithesis::json json_pairs = antithesis::json(pairs); \
+    GuidanceCatalogEntry< \
+        decltype(json_pairs), \
+        antithesis::GUIDEPOST_ALL, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(json_pairs); \
+} while (0)
+
+#define SOMETIMES_ALL(pairs, message, ...) \
+do { \
+    bool conjunction = true; \
+    for (std::pair<std::string, bool> pair : pairs) { \
+        if (!pair.second) { \
+            conjunction = false; \
+            break; \
+        } \
+    } \
+    SOMETIMES(conjunction, message, __VA_ARGS__); \
+    antithesis::json json_pairs = antithesis::json(pairs); \
+    GuidanceCatalogEntry< \
+        decltype(json_pairs), \
+        antithesis::GUIDEPOST_ALL, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::guidepost.send_guidance(json_pairs); \
+} while (0)
 
 #endif
 
