@@ -844,6 +844,7 @@ do { \
         std::source_location::current().column() \
     >::guidepost.send_guidance(left - right); \
 } while (0)
+
 #define ALWAYS_SOME(pairs, message, ...) \
 do { \
     bool disjunction = false; \
@@ -858,28 +859,6 @@ do { \
     GuidanceCatalogEntry< \
         decltype(json_pairs), \
         antithesis::GUIDEPOST_NONE, \
-        fixed_string(message), \
-        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
-        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
-        std::source_location::current().line(), \
-        std::source_location::current().column() \
-    >::guidepost.send_guidance(json_pairs); \
-} while (0)
-
-#define NEVER_ALL(pairs, message, ...) \
-do { \
-    bool conjunction = true; \
-    for (std::pair<std::string, bool> pair : pairs) { \
-        if (!pair.second) { \
-            conjunction = false; \
-            break; \
-        } \
-    } \
-    ALWAYS(!conjunction, message, __VA_ARGS__); \
-    antithesis::json json_pairs = antithesis::json(pairs); \
-    GuidanceCatalogEntry< \
-        decltype(json_pairs), \
-        antithesis::GUIDEPOST_ALL, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
