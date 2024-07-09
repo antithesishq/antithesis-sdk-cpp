@@ -39,6 +39,12 @@ namespace antithesis {
 
     struct JSON : std::map<std::string, ValueType> {
         JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
+
+        JSON( std::initializer_list<std::pair<const std::string, ValueType>> args, std::vector<std::pair<const std::string, ValueType>> more_args ) : std::map<std::string, ValueType>(args) {
+            for (auto& pair : more_args) {
+                (*this)[pair.first] = pair.second;
+            }
+        }
     };
 
     // Declarations that we expose
@@ -68,7 +74,6 @@ namespace antithesis {
 #define SOMETIMES_LESS_THAN(val, threshold, message, ...)
 #define SOMETIMES_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...)
 #define ALWAYS_SOME(pairs, message, ...)
-#define NEVER_ALL(pairs, message, ...)
 #define SOMETIMES_ALL(pairs, message, ...)
 
 namespace antithesis {
@@ -735,7 +740,14 @@ namespace {
 
 #define ALWAYS_GREATER_THAN(left, right, message, ...) \
 do { \
-    ALWAYS(left > right, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::ALWAYS_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(left > right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MINIMIZE, \
@@ -749,7 +761,14 @@ do { \
 
 #define ALWAYS_GREATER_THAN_OR_EQUAL_TO(left, right, message, ...) \
 do { \
-    ALWAYS(left >= right, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::ALWAYS_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(left >= right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MINIMIZE, \
@@ -763,7 +782,14 @@ do { \
 
 #define SOMETIMES_GREATER_THAN(left, right, message, ...) \
 do { \
-    SOMETIMES(left > right, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::SOMETIMES_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(left > right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MAXIMIZE, \
@@ -777,7 +803,14 @@ do { \
 
 #define SOMETIMES_GREATER_THAN_OR_EQUAL_TO(left, right, message, ...) \
 do { \
-    SOMETIMES(left >= right, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::SOMETIMES_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(left >= right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MAXIMIZE, \
@@ -791,7 +824,14 @@ do { \
 
 #define ALWAYS_LESS_THAN(left, right, message, ...) \
 do { \
-    ALWAYS(left < right, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::ALWAYS_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(left < right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MAXIMIZE, \
@@ -805,7 +845,14 @@ do { \
 
 #define ALWAYS_LESS_THAN_OR_EQUAL_TO(left, right, message, ...) \
 do { \
-    ALWAYS(left <= right, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::ALWAYS_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(left <= right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MAXIMIZE, \
@@ -819,7 +866,14 @@ do { \
 
 #define SOMETIMES_LESS_THAN(left, right, message, ...) \
 do { \
-    SOMETIMES(left < right, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::SOMETIMES_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(left < right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MINIMIZE, \
@@ -833,7 +887,14 @@ do { \
 
 #define SOMETIMES_LESS_THAN_OR_EQUAL_TO(left, right, message, ...) \
 do { \
-    SOMETIMES(left <= right, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::SOMETIMES_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(left <= right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
         decltype(left), \
         antithesis::GUIDEPOST_MINIMIZE, \
@@ -854,7 +915,14 @@ do { \
             break; \
         } \
     } \
-    ALWAYS(disjunction, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::ALWAYS_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(disjunction, (antithesis::JSON(__VA_ARGS__, pairs)) ); \
     antithesis::json json_pairs = antithesis::json(pairs); \
     GuidanceCatalogEntry< \
         decltype(json_pairs), \
@@ -876,7 +944,14 @@ do { \
             break; \
         } \
     } \
-    SOMETIMES(conjunction, message, __VA_ARGS__); \
+    CatalogEntry< \
+        antithesis::SOMETIMES_ASSERTION, \
+        fixed_string(message), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
+        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
+        std::source_location::current().line(), \
+        std::source_location::current().column() \
+    >::assertion.check_assertion(conjunction, (antithesis::JSON(__VA_ARGS__, pairs)) ); \
     antithesis::json json_pairs = antithesis::json(pairs); \
     GuidanceCatalogEntry< \
         decltype(json_pairs), \
