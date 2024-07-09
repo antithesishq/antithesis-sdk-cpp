@@ -569,13 +569,12 @@ namespace antithesis {
         }
     }
 
-    template <typename T>
-    struct IGuidepost {
+    struct JsonGuidepost {
         const char* message;
         LocationInfo location;
         GuidepostType type;
 
-        IGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
+        JsonGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
             message(message), location(std::move(location)), type(type) {
                 this->add_to_catalog();
             }
@@ -595,7 +594,7 @@ namespace antithesis {
             get_lib_handler().output(catalog);
         }
 
-        inline void send_guidance(T data) {
+        inline void send_guidance(antithesis::JSON data) {
             std::string id = make_key(message, location);
             JSON guidance{
                 {"antithesis_guidance", JSON{
@@ -609,45 +608,6 @@ namespace antithesis {
                 }}
             };
             get_lib_handler().output(guidance);
-        }
-    };
-
-    template <typename Value>
-    struct NumericGuidepost : IGuidepost<Value> {
-        Value extreme_value;
-
-        NumericGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
-            IGuidepost<Value>(message, std::move(location), type) {
-                if (type == GUIDEPOST_MAXIMIZE) {
-                    extreme_value = std::numeric_limits<Value>::min(); 
-                } else {
-                    extreme_value = std::numeric_limits<Value>::max();
-                }
-            }
-
-        bool should_send_value(Value value) {
-            if (this->type == GUIDEPOST_MAXIMIZE) {
-                return value > extreme_value;
-            } else {
-                return value < extreme_value;
-            }
-        }
-
-        [[clang::always_inline]] inline void send_guidance(Value value) {
-            if (should_send_value(value)) {
-                extreme_value = value;
-                IGuidepost<Value>::send_guidance(value);
-            }
-        }   
-    };
-
-    template <typename GuidanceType>
-    struct BooleanGuidepost : IGuidepost<GuidanceType> {
-        BooleanGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
-            IGuidepost<GuidanceType>(message, std::move(location), type) {}
-
-        [[clang::always_inline]] inline void send_guidance(GuidanceType data) {
-            IGuidepost<GuidanceType>::send_guidance(data);
         }
     };
 }
@@ -702,21 +662,20 @@ namespace {
 
     template<typename GuidanceDataType, antithesis::GuidepostType type, fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
     struct GuidanceCatalogEntry {
-        [[clang::always_inline]] static inline antithesis::IGuidepost<GuidanceDataType> create() {
+        [[clang::always_inline]] static inline antithesis::JsonGuidepost create() {
             antithesis::LocationInfo location{ "", function_name.c_str(), file_name.c_str(), line, column };
             switch (type) {
                 case antithesis::GUIDEPOST_MAXIMIZE:
                 case antithesis::GUIDEPOST_MINIMIZE:
-                    return antithesis::NumericGuidepost<GuidanceDataType>(message.c_str(), std::move(location), type);
                 case antithesis::GUIDEPOST_ALL:
                 case antithesis::GUIDEPOST_NONE:
-                    return antithesis::BooleanGuidepost<GuidanceDataType>(message.c_str(), std::move(location), type);
+                    return antithesis::JsonGuidepost(message.c_str(), std::move(location), type);
                 case antithesis::GUIDEPOST_EXPLORE:
                     throw std::runtime_error("explore guidance is not supported");
             }
         }
         
-        static inline antithesis::IGuidepost<GuidanceDataType> guidepost = create();
+        static inline antithesis::JsonGuidepost guidepost = create();
     };
 }
 
@@ -756,7 +715,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(left - right); \
+    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
 } while (0)
 
 #define ALWAYS_GREATER_THAN_OR_EQUAL_TO(left, right, message, ...) \
@@ -777,7 +736,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(left - right); \
+    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
 } while (0)
 
 #define SOMETIMES_GREATER_THAN(left, right, message, ...) \
@@ -798,7 +757,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(left - right); \
+    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
 } while (0)
 
 #define SOMETIMES_GREATER_THAN_OR_EQUAL_TO(left, right, message, ...) \
@@ -819,7 +778,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(left - right); \
+    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
 } while (0)
 
 #define ALWAYS_LESS_THAN(left, right, message, ...) \
@@ -840,7 +799,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(left - right); \
+    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
 } while (0)
 
 #define ALWAYS_LESS_THAN_OR_EQUAL_TO(left, right, message, ...) \
@@ -861,7 +820,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(left - right); \
+    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
 } while (0)
 
 #define SOMETIMES_LESS_THAN(left, right, message, ...) \
@@ -882,7 +841,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(left - right); \
+    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
 } while (0)
 
 #define SOMETIMES_LESS_THAN_OR_EQUAL_TO(left, right, message, ...) \
@@ -903,7 +862,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(left - right); \
+    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
 } while (0)
 
 #define ALWAYS_SOME(pairs, message, ...) \
