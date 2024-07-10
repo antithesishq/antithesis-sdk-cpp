@@ -681,6 +681,24 @@ namespace {
 
 #define FIXED_STRING_FROM_C_STR(s) (fixed_string<string_length(s)+1>::from_c_str(s))
 
+#define _NL_1(foo) { #foo, foo }
+#define _NL_2(foo, ...) { #foo, foo }, _NL_1(__VA_ARGS__)
+#define _NL_3(foo, ...) { #foo, foo }, _NL_2(__VA_ARGS__)
+#define _NL_4(foo, ...) { #foo, foo }, _NL_3(__VA_ARGS__)
+#define _NL_5(foo, ...) { #foo, foo }, _NL_4(__VA_ARGS__)
+#define _NL_6(foo, ...) { #foo, foo }, _NL_5(__VA_ARGS__)
+#define _NL_7(foo, ...) { #foo, foo }, _NL_6(__VA_ARGS__)
+#define _NL_8(foo, ...) { #foo, foo }, _NL_7(__VA_ARGS__)
+#define _NL_9(foo, ...) { #foo, foo }, _NL_8(__VA_ARGS__)
+#define _NL_10(foo, ...) { #foo, foo }, _NL_9(__VA_ARGS__)
+
+#define _ELEVENTH_ARG(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, N, ...) N
+
+#define _GET_NL(...) \
+    _ELEVENTH_ARG(__VA_ARGS__, _NL_10, _NL_9, _NL_8, _NL_7, _NL_6, _NL_5, _NL_4, _NL_3, _NL_2, _NL_1)
+
+#define NAMED_LIST(...) { _GET_NL(__VA_ARGS__)(__VA_ARGS__) }
+
 #define ANTITHESIS_ASSERT_RAW(type, cond, message, ...) ( \
     CatalogEntry< \
         type, \
