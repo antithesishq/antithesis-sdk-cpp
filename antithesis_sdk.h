@@ -11,6 +11,7 @@
 #include <set>
 #include <variant>
 #include <vector>
+#include <utility>
 
 namespace antithesis {
     inline const char* SDK_VERSION = "0.4.0";
@@ -569,12 +570,13 @@ namespace antithesis {
         }
     }
 
-    struct JsonGuidepost {
+    template <typename T>
+    struct IGuidepost {
         const char* message;
         LocationInfo location;
         GuidepostType type;
 
-        JsonGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
+        IGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
             message(message), location(std::move(location)), type(type) {
                 this->add_to_catalog();
             }
@@ -594,7 +596,7 @@ namespace antithesis {
             get_lib_handler().output(catalog);
         }
 
-        inline void send_guidance(antithesis::JSON data) {
+        inline void send_guidance(T data) {
             std::string id = make_key(message, location);
             JSON guidance{
                 {"antithesis_guidance", JSON{
@@ -608,6 +610,120 @@ namespace antithesis {
                 }}
             };
             get_lib_handler().output(guidance);
+        }
+    };
+
+    template <typename Value, class NumericValue=Value::value_type>
+    struct NumericGuidepost : IGuidepost<Value> {
+        // an approximation of (left - right) / 2; contains an absolute value and a sign bit
+        std::pair<NumericValue, bool> extreme_half_gap;
+
+        NumericGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
+            IGuidepost<Value>(message, std::move(location), type) {
+                if (type == GUIDEPOST_MAXIMIZE) {
+                    extreme_half_gap = { std::numeric_limits<NumericValue>::max(), false }; 
+                } else {
+                    extreme_half_gap = { std::numeric_limits<NumericValue>::max(), true };
+                }
+            }
+
+        std::pair<NumericValue, bool> compute_half_gap(Value value) {
+            NumericValue left = value[0];
+            NumericValue right = value[1];
+            // An extremely baroque way to compute (left - right) / 2, rounded toward 0, without overflowing or underflowing
+            if (std::is_integral_v<NumericValue>) {
+                // If both numbers are odd then the gap doesn't change if we subtract 1 from both sides
+                // Also subtracting 1 from both sides won't underflow
+                if (left % 2 == 1 && right % 2 == 1) 
+                    return compute_half_gap({ left - 1, right - 1});
+                // If one number is odd then we subtract 1 from the larger number
+                // This rounds the computation toward 0 but again won't underflow
+                if (left % 2 == 1 || right % 2 == 1) {
+                    if (left > right) {
+                        return compute_half_gap({ left - 1, right });
+                    } else {
+                        return compute_half_gap({ left, right - 1});
+                    }
+                }
+                // At this point both numbers are even, so the midpoint calculation is exact
+                NumericValue half_left = left / 2;
+                NumericValue half_right = right / 2;
+                NumericValue midpoint = half_left + half_right;
+                // This won't overflow or underflow because we're subtracting the midpoint
+                // We compute a positive value and a sign so that we don't have to do weird things with unsigned types
+                if (left > right) {
+                    return { midpoint - right, true };
+                } else {
+                    return { right - midpoint, false };
+                }
+            } else {
+                // If it's floating point we don't need to worry about overflowing, just do the arithmetic
+                return { abs((left - right) / 2), left > right };
+            }
+        }
+
+        bool should_send_value(std::pair<NumericValue, bool> half_gap) {
+            if (this->type == GUIDEPOST_MAXIMIZE) {
+                if (half_gap.second && !extreme_half_gap.second) {
+                    // we're positive and the extreme value isn't; always send back
+                    return true;
+                } else if (!half_gap.second && extreme_half_gap.second) {
+                    // we're negative and the extreme value is positive; never send back
+                    return false;
+                } else if (half_gap.second && extreme_half_gap.second) {
+                    // both positive; send back if our absolute value is at least as large
+                    return half_gap.first >= extreme_half_gap.first;
+                } else {
+                    // both negative; send back if our absolute value is at least as small
+                    return half_gap.first <= extreme_half_gap.first;
+                }
+            } else {
+                if (half_gap.second && !extreme_half_gap.second) {
+                    // we're positive and the extreme value isn't; never send back
+                    return false;
+                } else if (!half_gap.second && extreme_half_gap.second) {
+                    // we're negative and the extreme value is positive; always send back
+                    return true;
+                } else if (half_gap.second && extreme_half_gap.second) {
+                    // both positive; send back if our absolute value is at least as small
+                    return half_gap.first <= extreme_half_gap.first;
+                } else {
+                    // both negative; send back if our absolute value is at least as large
+                    return half_gap.first >= extreme_half_gap.first;
+                }
+            }
+        }
+
+        [[clang::always_inline]] inline void send_guidance(Value value) {
+            std::pair<NumericValue, bool> half_gap = compute_half_gap(value);
+            if (should_send_value(half_gap)) {
+                extreme_half_gap = half_gap;
+                std::string id = make_key(this->message, this->location);
+                JSON guidance{
+                    {"antithesis_guidance", JSON{
+                        {"guidance_type", get_guidance_type_string(this->type)},
+                        {"message", this->message},
+                        {"id", id},
+                        {"location", this->location.to_json()},
+                        {"maximize", does_guidance_maximize(this->type)},
+                        {"guidance_data", JSON{ 
+                            { "left", value[0] },    
+                            { "right", value[1] } }},
+                        {"hit", true}
+                    }}
+                };
+                get_lib_handler().output(guidance);
+            }
+        }   
+    };
+
+    template <typename GuidanceType>
+    struct BooleanGuidepost : IGuidepost<GuidanceType> {
+        BooleanGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
+            IGuidepost<GuidanceType>(message, std::move(location), type) {}
+
+        [[clang::always_inline]] inline void send_guidance(GuidanceType data) {
+            IGuidepost<GuidanceType>::send_guidance(data);
         }
     };
 }
@@ -662,20 +778,21 @@ namespace {
 
     template<typename GuidanceDataType, antithesis::GuidepostType type, fixed_string message, fixed_string file_name, fixed_string function_name, int line, int column>
     struct GuidanceCatalogEntry {
-        [[clang::always_inline]] static inline antithesis::JsonGuidepost create() {
+        [[clang::always_inline]] static inline antithesis::IGuidepost<GuidanceDataType> create() {
             antithesis::LocationInfo location{ "", function_name.c_str(), file_name.c_str(), line, column };
             switch (type) {
                 case antithesis::GUIDEPOST_MAXIMIZE:
                 case antithesis::GUIDEPOST_MINIMIZE:
+                    return antithesis::NumericGuidepost<GuidanceDataType>(message.c_str(), std::move(location), type);
                 case antithesis::GUIDEPOST_ALL:
                 case antithesis::GUIDEPOST_NONE:
-                    return antithesis::JsonGuidepost(message.c_str(), std::move(location), type);
+                    return antithesis::BooleanGuidepost<GuidanceDataType>(message.c_str(), std::move(location), type);
                 case antithesis::GUIDEPOST_EXPLORE:
                     throw std::runtime_error("explore guidance is not supported");
             }
         }
         
-        static inline antithesis::JsonGuidepost guidepost = create();
+        static inline antithesis::IGuidepost<GuidanceDataType> guidepost = create();
     };
 }
 
@@ -717,6 +834,7 @@ namespace {
 
 #define ALWAYS_GREATER_THAN(left, right, message, ...) \
 do { \
+    static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in ALWAYS_GREATER_THAN must be of same type"); \
     CatalogEntry< \
         antithesis::ALWAYS_ASSERTION, \
         fixed_string(message), \
@@ -726,18 +844,19 @@ do { \
         std::source_location::current().column() \
     >::assertion.check_assertion(left > right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
-        decltype(left), \
+        std::vector<antithesis::BasicValueType>, \
         antithesis::GUIDEPOST_MINIMIZE, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
+    >::guidepost.send_guidance({ left, right }); \
 } while (0)
 
 #define ALWAYS_GREATER_THAN_OR_EQUAL_TO(left, right, message, ...) \
 do { \
+    static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in ALWAYS_GREATER_THAN_OR_EQUAL_TO must be of same type"); \
     CatalogEntry< \
         antithesis::ALWAYS_ASSERTION, \
         fixed_string(message), \
@@ -747,18 +866,19 @@ do { \
         std::source_location::current().column() \
     >::assertion.check_assertion(left >= right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
-        decltype(left), \
+        std::vector<antithesis::BasicValueType>, \
         antithesis::GUIDEPOST_MINIMIZE, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
+    >::guidepost.send_guidance({ left, right }); \
 } while (0)
 
 #define SOMETIMES_GREATER_THAN(left, right, message, ...) \
 do { \
+    static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in SOMETIMES_GREATER_THAN must be of same type"); \
     CatalogEntry< \
         antithesis::SOMETIMES_ASSERTION, \
         fixed_string(message), \
@@ -768,18 +888,19 @@ do { \
         std::source_location::current().column() \
     >::assertion.check_assertion(left > right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
-        decltype(left), \
+        std::vector<antithesis::BasicValueType>, \
         antithesis::GUIDEPOST_MAXIMIZE, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
+    >::guidepost.send_guidance({ left, right }); \
 } while (0)
 
 #define SOMETIMES_GREATER_THAN_OR_EQUAL_TO(left, right, message, ...) \
 do { \
+    static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in SOMETIMES_GREATER_THAN_OR_EQUAL_TO must be of same type"); \
     CatalogEntry< \
         antithesis::SOMETIMES_ASSERTION, \
         fixed_string(message), \
@@ -789,18 +910,19 @@ do { \
         std::source_location::current().column() \
     >::assertion.check_assertion(left >= right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
-        decltype(left), \
+        std::vector<antithesis::BasicValueType>, \
         antithesis::GUIDEPOST_MAXIMIZE, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
+    >::guidepost.send_guidance({ left, right }); \
 } while (0)
 
 #define ALWAYS_LESS_THAN(left, right, message, ...) \
 do { \
+    static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in ALWAYS_LESS_THAN must be of same type"); \
     CatalogEntry< \
         antithesis::ALWAYS_ASSERTION, \
         fixed_string(message), \
@@ -810,18 +932,19 @@ do { \
         std::source_location::current().column() \
     >::assertion.check_assertion(left < right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
-        decltype(left), \
+        std::vector<antithesis::BasicValueType>, \
         antithesis::GUIDEPOST_MAXIMIZE, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
+    >::guidepost.send_guidance({ left, right }); \
 } while (0)
 
 #define ALWAYS_LESS_THAN_OR_EQUAL_TO(left, right, message, ...) \
 do { \
+    static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in ALWAYS_LESS_THAN_OR_EQUAL_TO must be of same type"); \
     CatalogEntry< \
         antithesis::ALWAYS_ASSERTION, \
         fixed_string(message), \
@@ -831,18 +954,19 @@ do { \
         std::source_location::current().column() \
     >::assertion.check_assertion(left <= right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
-        decltype(left), \
+        std::vector<antithesis::BasicValueType>, \
         antithesis::GUIDEPOST_MAXIMIZE, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
+    >::guidepost.send_guidance({ left, right }); \
 } while (0)
 
 #define SOMETIMES_LESS_THAN(left, right, message, ...) \
 do { \
+    static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in SOMETIMES_LESS_THAN must be of same type"); \
     CatalogEntry< \
         antithesis::SOMETIMES_ASSERTION, \
         fixed_string(message), \
@@ -852,18 +976,19 @@ do { \
         std::source_location::current().column() \
     >::assertion.check_assertion(left < right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
-        decltype(left), \
+        std::vector<antithesis::BasicValueType>, \
         antithesis::GUIDEPOST_MINIMIZE, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
+    >::guidepost.send_guidance({ left, right }); \
 } while (0)
 
 #define SOMETIMES_LESS_THAN_OR_EQUAL_TO(left, right, message, ...) \
 do { \
+    static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in SOMETIMES_LESS_THAN_OR_EQUAL_TO must be of same type"); \
     CatalogEntry< \
         antithesis::SOMETIMES_ASSERTION, \
         fixed_string(message), \
@@ -873,14 +998,14 @@ do { \
         std::source_location::current().column() \
     >::assertion.check_assertion(left <= right, (antithesis::JSON(__VA_ARGS__, {{ "left", left }, { "right", right }})) ); \
     GuidanceCatalogEntry< \
-        decltype(left), \
+        std::vector<antithesis::BasicValueType>, \
         antithesis::GUIDEPOST_MINIMIZE, \
         fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(antithesis::JSON({{"left", left}, {"right", right}})); \
+    >::guidepost.send_guidance({ left, right }); \
 } while (0)
 
 #define ALWAYS_SOME(pairs, message, ...) \
