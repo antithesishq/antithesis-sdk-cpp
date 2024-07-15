@@ -616,7 +616,7 @@ namespace antithesis {
                     if (left > right) {
                         return compute_half_gap( left - 1, right );
                     } else {
-                        return compute_half_gap( left, right - 1 `  );
+                        return compute_half_gap( left, right - 1 );
                     }
                 }
                 // At this point both numbers are even, so the midpoint calculation is exact
