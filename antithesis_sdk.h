@@ -603,22 +603,20 @@ namespace antithesis {
             get_lib_handler().output(catalog);
         }
 
-        std::pair<NumericValue, bool> compute_half_gap(Value value) {
-            NumericValue left = value.first;
-            NumericValue right = value.second;
+        std::pair<NumericValue, bool> compute_half_gap(NumericValue left, NumericValue right) {
             // An extremely baroque way to compute (left - right) / 2, rounded toward 0, without overflowing or underflowing
             if (std::is_integral_v<NumericValue>) {
                 // If both numbers are odd then the gap doesn't change if we subtract 1 from both sides
                 // Also subtracting 1 from both sides won't underflow
                 if (left % 2 == 1 && right % 2 == 1) 
-                    return compute_half_gap({ left - 1, right - 1});
+                    return compute_half_gap( left - 1, right - 1);
                 // If one number is odd then we subtract 1 from the larger number
                 // This rounds the computation toward 0 but again won't underflow
                 if (left % 2 == 1 || right % 2 == 1) {
                     if (left > right) {
-                        return compute_half_gap({ left - 1, right });
+                        return compute_half_gap( left - 1, right );
                     } else {
-                        return compute_half_gap({ left, right - 1});
+                        return compute_half_gap( left, right - 1 `  );
                     }
                 }
                 // At this point both numbers are even, so the midpoint calculation is exact
@@ -671,7 +669,7 @@ namespace antithesis {
         }
 
         [[clang::always_inline]] inline void send_guidance(Value value) {
-            std::pair<NumericValue, bool> half_gap = compute_half_gap(value);
+            std::pair<NumericValue, bool> half_gap = compute_half_gap(value.first, value.second);
             if (should_send_value(half_gap)) {
                 extreme_half_gap = half_gap;
                 std::string id = make_key(this->message, this->location);
