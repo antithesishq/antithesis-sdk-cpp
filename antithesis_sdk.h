@@ -39,6 +39,8 @@ namespace antithesis {
     typedef std::variant<BasicValueType, JSON_ARRAY> ValueType;
 
     struct JSON : std::map<std::string, ValueType> {
+        JSON() : std::map<std::string, ValueType>() {}
+
         JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
 
         JSON( std::initializer_list<std::pair<const std::string, ValueType>> args, std::vector<std::pair<const std::string, ValueType>> more_args ) : std::map<std::string, ValueType>(args) {
