@@ -33,15 +33,20 @@ namespace antithesis {
         }
     };
 
-    struct JSON;
-    typedef std::variant<std::string, bool, char, int, uint64_t, float, double, const char*, JSON> BasicValueType;
-    typedef std::vector<BasicValueType> JSON_ARRAY;
-    typedef std::variant<BasicValueType, JSON_ARRAY> ValueType;
+    struct JSON; struct JSONArray;
+    typedef std::variant<std::nullptr_t, std::string, bool, char, int, uint64_t, float, double, const char*, JSON, JSONArray> JSONValue;
 
-    struct JSON : std::map<std::string, ValueType> {
-        JSON( std::initializer_list<std::pair<const std::string, ValueType>> args) : std::map<std::string, ValueType>(args) {}
+    struct JSONArray : std::vector<JSONValue> {
+        using std::vector<JSONValue>::vector;
 
-        JSON( std::initializer_list<std::pair<const std::string, ValueType>> args, std::vector<std::pair<const std::string, ValueType>> more_args ) : std::map<std::string, ValueType>(args) {
+        template<typename T> requires std::convertible_to<T, JSONValue>
+        JSONArray(std::vector<T> vals) : std::vector<JSONValue>(vals.begin(), vals.end()) {}
+    };
+
+    struct JSON : std::map<std::string, JSONValue> {
+        JSON( std::initializer_list<std::pair<const std::string, JSONValue>> args) : std::map<std::string, JSONValue>(args) {}
+
+        JSON( std::initializer_list<std::pair<const std::string, JSONValue>> args, std::vector<std::pair<const std::string, JSONValue>> more_args ) : std::map<std::string, JSONValue>(args) {
             for (auto& pair : more_args) {
                 (*this)[pair.first] = pair.second;
             }
@@ -264,7 +269,7 @@ namespace antithesis {
     template<class>
     inline constexpr bool always_false_v = false;
 
-    static std::ostream& operator<<(std::ostream& out, const BasicValueType& basic_value) {
+    static std::ostream& operator<<(std::ostream& out, const JSONValue& json) {
         std::visit([&](auto&& arg)
         {
             using T = std::decay_t<decltype(arg)>;
@@ -285,41 +290,25 @@ namespace antithesis {
                 out << arg;
             } else if constexpr (std::is_same_v<T, const char*>) {
                 out << std::quoted(arg);
+            } else if constexpr (std::is_same_v<T, std::nullptr_t>) {
+                out << "null";
             } else if constexpr (std::is_same_v<T, JSON>) {
-                if (arg.empty()) {
-                    out << "null";
-                } else {
-                    out << arg;
-                }
-            } else {
-                static_assert(always_false_v<T>, "non-exhaustive BasicValueType visitor!");
-            }
-        }, basic_value);
-
-        return out;
-    }
-
-    static std::ostream& operator<<(std::ostream& out, const ValueType& value) {
-        std::visit([&](auto&& arg)
-        {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, BasicValueType>) {
                 out << arg;
-            } else if constexpr (std::is_same_v<T, std::vector<BasicValueType>>) {
+            } else if constexpr (std::is_same_v<T, JSONArray>) {
                 out << '[';
                 bool first = true;
                 for (auto &item : arg) {
-                  if (!first) {
-                    out << ',';
-                  }
-                  first = false;
-                  out << item;
+                    if (!first) {
+                        out << ", ";
+                    }
+                    first = false;
+                    out << item;
                 }
                 out << ']';
             } else {
-                static_assert(always_false_v<T>, "non-exhaustive ValueType visitor!");
+                static_assert(always_false_v<T>, "non-exhaustive JSONValue visitor!");
             }
-        }, value);
+        }, json);
 
         return out;
     }
