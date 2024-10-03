@@ -34,16 +34,17 @@ namespace antithesis {
     };
 
     struct JSON; struct JSONArray;
-    typedef std::variant<std::nullptr_t, std::string, bool, char, int, uint64_t, float, double, const char*, JSON, JSONArray> JSONValue;
+    typedef std::variant<JSON, std::nullptr_t, std::string, bool, char, int, uint64_t, float, double, const char*, JSONArray> JSONValue;
 
     struct JSONArray : std::vector<JSONValue> {
         using std::vector<JSONValue>::vector;
 
-        template<typename T> requires std::convertible_to<T, JSONValue>
+        template<typename T, std::enable_if<std::is_convertible<T, JSONValue>::value, bool>::type = true>
         JSONArray(std::vector<T> vals) : std::vector<JSONValue>(vals.begin(), vals.end()) {}
     };
 
     struct JSON : std::map<std::string, JSONValue> {
+        JSON() : std::map<std::string, JSONValue>() {}
         JSON( std::initializer_list<std::pair<const std::string, JSONValue>> args) : std::map<std::string, JSONValue>(args) {}
 
         JSON( std::initializer_list<std::pair<const std::string, JSONValue>> args, std::vector<std::pair<const std::string, JSONValue>> more_args ) : std::map<std::string, JSONValue>(args) {
@@ -299,7 +300,7 @@ namespace antithesis {
                 bool first = true;
                 for (auto &item : arg) {
                     if (!first) {
-                        out << ", ";
+                        out << ',';
                     }
                     first = false;
                     out << item;
@@ -314,18 +315,18 @@ namespace antithesis {
     }
 
     static std::ostream& operator<<(std::ostream& out, const JSON& details) {
-        out << "{ ";
+        out << '{';
 
         bool first = true;
         for (auto [key, value] : details) {
             if (!first) {
-                out << ", ";
+                out << ',';
             }
-            out << std::quoted(key) << ": " << value;
+            out << std::quoted(key) << ':' << value;
             first = false;
         }
 
-        out << " }";
+        out << '}';
         return out;
     }
 
