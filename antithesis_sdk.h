@@ -60,11 +60,13 @@ namespace antithesis {
 
 #if defined(NO_ANTITHESIS_SDK) || __cplusplus < 202000L || (defined(__clang__) && __clang_major__ < 16)
 
+#ifndef NO_ANTITHESIS_SDK
 #if __cplusplus < 202000L
     #error "The Antithesis C++ API requires C++20 or higher"
 #endif
 #if defined(__clang__) && __clang_major__ < 16
     #error "The Antithesis C++ API requires clang version 16 or higher"
+#endif
 #endif
 
 #define ALWAYS(cond, message, ...)
