@@ -4,7 +4,6 @@
 //
 // Documentation for the SDK is found at https://antithesis.com/docs/using_antithesis/sdk/cpp/overview.html.
 
-#include <cassert>
 #include <cstdint>
 #include <random>
 #include <string>
@@ -70,23 +69,27 @@ namespace antithesis {
 #endif
 #endif
 
-#define ALWAYS(cond, message, ...) assert((message) && (cond))
-#define ALWAYS_OR_UNREACHABLE(cond, message, ...) assert((message) && (cond))
+#ifndef ANTITHESIS_SDK_POLYFILL
+#define ANTITHESIS_SDK_POLYFILL
+#endif
+
+#define ALWAYS(cond, message, ...) ANTITHESIS_SDK_POLYFILL(cond, message, __VA_ARGS__)
+#define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_SDK_POLYFILL(cond, message, __VA_ARGS__)
 #define SOMETIMES(cond, message, ...)
 #define REACHABLE(message, ...)
-#define UNREACHABLE(message, ...) assert((message) && false)
-#define ALWAYS_GREATER_THAN(val, threshold, message, ...) assert((message) && (val > threshold) && (cond))
-#define ALWAYS_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...) assert((message) && (val >= threshold) && (cond))
+#define UNREACHABLE(message, ...) ANTITHESIS_SDK_POLYFILL(false, message, __VA_ARGS__)
+#define ALWAYS_GREATER_THAN(val, threshold, message, ...) ANTITHESIS_SDK_POLYFILL((val > threshold), message, __VA_ARGS__)
+#define ALWAYS_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...) ANTITHESIS_SDK_POLYFILL((val >= threshold), message, __VA_ARGS__)
 #define SOMETIMES_GREATER_THAN(val, threshold, message, ...)
 #define SOMETIMES_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...)
-#define ALWAYS_LESS_THAN(val, threshold, message, ...) assert((message) && (val < threshold) && (cond))
-#define ALWAYS_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...) assert((message) && (val <= threshold) && (cond))
+#define ALWAYS_LESS_THAN(val, threshold, message, ...) ANTITHESIS_SDK_POLYFILL((val < threshold), message, __VA_ARGS__)
+#define ALWAYS_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...) ANTITHESIS_SDK_POLYFILL((val <= threshold), message, __VA_ARGS__)
 #define SOMETIMES_LESS_THAN(val, threshold, message, ...)
 #define SOMETIMES_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...)
-#define ALWAYS_SOME(pairs, message, ...) assert((message) && [&](){ \
+#define ALWAYS_SOME(pairs, message, ...) ANTITHESIS_SDK_POLYFILL([&](){ \
     for (std::pair<std::string, bool> pair : pairs) \
         if (pair.second) return true; \
-    return false; }())
+    return false; }(), message, __VA_ARGS__)
 #define SOMETIMES_ALL(pairs, message, ...)
 
 namespace antithesis {
