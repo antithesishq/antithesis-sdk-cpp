@@ -906,7 +906,7 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 #define ANTITHESIS_NUMERIC_ASSERT_RAW(name, assertion_type, guidepost_type, left, cmp, right, message, ...) \
 do { \
     static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in " #name " must be of same type"); \
-    ANTITHESIS_ASSERT_RAW(assertion_type, left cmp right, message, __VA_ARGS__, {{ "left", left }, { "right", right }} ); \
+    ANTITHESIS_ASSERT_RAW(assertion_type, left cmp right, message, __VA_ARGS__ __VA_OPT__(,) {{ "left", left }, { "right", right }} ); \
     antithesis::internal::NumericGuidanceCatalogEntry< \
         decltype(left), \
         guidepost_type, \
@@ -952,7 +952,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::assertion.check_assertion(disjunction, (antithesis::JSON(__VA_ARGS__, pairs)) ); \
+    >::assertion.check_assertion(disjunction, (antithesis::JSON(__VA_ARGS__ __VA_OPT__(,) pairs)) ); \
     antithesis::JSON json_pairs = antithesis::JSON(pairs); \
     antithesis::internal::BooleanGuidanceCatalogEntry< \
         decltype(json_pairs), \
@@ -982,7 +982,7 @@ do { \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::assertion.check_assertion(conjunction, (antithesis::JSON(__VA_ARGS__, pairs)) ); \
+    >::assertion.check_assertion(conjunction, (antithesis::JSON(__VA_ARGS__ __VA_OPT__(,) pairs)) ); \
     antithesis::JSON json_pairs = antithesis::JSON(pairs); \
     BooleanGuidanceCatalogEntry< \
         decltype(json_pairs), \
