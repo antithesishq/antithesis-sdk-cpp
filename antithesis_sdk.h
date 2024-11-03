@@ -938,7 +938,8 @@ ANTITHESIS_NUMERIC_ASSERT_RAW(SOMETIMES_LESS_THAN_OR_EQUAL_TO, antithesis::inter
 #define ALWAYS_SOME(pairs, message, ...) \
 do { \
     bool disjunction = false; \
-    for (std::pair<std::string, bool> pair : pairs) { \
+    std::vector<std::pair<std::string, bool>> vec_pairs = pairs; \
+    for (std::pair<std::string, bool> pair : vec_pairs) { \
         if (pair.second) { \
             disjunction = true; \
             break; \
@@ -967,7 +968,8 @@ do { \
 #define SOMETIMES_ALL(pairs, message, ...) \
 do { \
     bool conjunction = true; \
-    for (std::pair<std::string, bool> pair : pairs) { \
+    std::vector<std::pair<std::string, bool>> vec_pairs = pairs; \
+    for (std::pair<std::string, bool> pair : vec_pairs) { \
         if (!pair.second) { \
             conjunction = false; \
             break; \
