@@ -2,7 +2,7 @@
   with pkgs;
   stdenv.mkDerivation {
     pname = "antithesis-sdk-cpp";
-    version = "0.3.0";
+    version = "0.4.2";
 
     src = ./.;
 
