@@ -100,17 +100,40 @@ namespace antithesis::internal::json {
 
     static std::ostream& operator<<(std::ostream& out, const JSON& details);
 
+    static void escaped(std::ostream& out, const char c) {
+        const char HEX[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+        switch (c) {
+            case '\t': out << "\\t"; break;
+            case '\b': out << "\\b"; break;
+            case '\n': out << "\\n"; break;
+            case '\f': out << "\\f"; break;
+            case '\r': out << "\\r"; break;
+            case '\"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            default:
+                if ('\u0000' <= c && c <= '\u001F') {
+                    out << "\\u00" << HEX[(c >> 4) & 0x0F] << HEX[c & 0x0F];
+                } else {
+                    out << c;
+                }
+        }
+    }
+
     static std::ostream& operator<<(std::ostream& out, const JSONValue& json) {
-        std::visit([&](auto&& arg)
-        {
+        std::visit([&](auto&& arg) {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, std::string>) {
-                out << std::quoted(arg);
+                out << '"';
+                for (auto c : arg) {
+                    escaped(out, c);
+                }
+                out << '"';
             } else if constexpr (std::is_same_v<T, bool>) {
                 out << (arg ? "true" : "false");
             } else if constexpr (std::is_same_v<T, char>) {
-                char tmp[2] = {arg, '\0'};
-                out << std::quoted(tmp);
+                out << '"';
+                escaped(out, arg);
+                out << '"';
             } else if constexpr (std::is_same_v<T, int>) {
                 out << arg;
             } else if constexpr (std::is_same_v<T, uint64_t>) {
@@ -120,7 +143,11 @@ namespace antithesis::internal::json {
             } else if constexpr (std::is_same_v<T, double>) {
                 out << arg;
             } else if constexpr (std::is_same_v<T, const char*>) {
-                out << std::quoted(arg);
+                out << '"';
+                for (auto str = arg; *str != '\0'; str++) {
+                    escaped(out, *str);
+                }
+                out << '"';
             } else if constexpr (std::is_same_v<T, std::nullptr_t>) {
                 out << "null";
             } else if constexpr (std::is_same_v<T, JSON>) {
@@ -152,7 +179,11 @@ namespace antithesis::internal::json {
             if (!first) {
                 out << ',';
             }
-            out << std::quoted(key) << ':' << value;
+            out << '"';
+            for (auto c : key) {
+                escaped(out, c);
+            }
+            out << '"' << ':' << value;
             first = false;
         }
 
