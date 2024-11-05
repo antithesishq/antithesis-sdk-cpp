@@ -945,14 +945,7 @@ do { \
             break; \
         } \
     } \
-    antithesis::internal::CatalogEntry< \
-        antithesis::internal::assertions::ALWAYS_ASSERTION, \
-        antithesis::internal::fixed_string(message), \
-        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
-        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
-        std::source_location::current().line(), \
-        std::source_location::current().column() \
-    >::assertion.check_assertion(disjunction, (antithesis::JSON(__VA_ARGS__ __VA_OPT__(,) pairs)) ); \
+    ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::ALWAYS_ASSERTION, disjunction, message, __VA_ARGS__ __VA_OPT__(,) pairs); \
     antithesis::JSON json_pairs = antithesis::JSON(pairs); \
     antithesis::internal::BooleanGuidanceCatalogEntry< \
         decltype(json_pairs), \
@@ -975,16 +968,9 @@ do { \
             break; \
         } \
     } \
-    CatalogEntry< \
-        antithesis::internal::assertions::SOMETIMES_ASSERTION, \
-        antithesis::internal::fixed_string(message), \
-        FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
-        FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
-        std::source_location::current().line(), \
-        std::source_location::current().column() \
-    >::assertion.check_assertion(conjunction, (antithesis::JSON(__VA_ARGS__ __VA_OPT__(,) pairs)) ); \
+    ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::SOMETIMES_ASSERTION, conjunction, message, __VA_ARGS__ __VA_OPT__(,) pairs); \
     antithesis::JSON json_pairs = antithesis::JSON(pairs); \
-    BooleanGuidanceCatalogEntry< \
+    antithesis::internal::BooleanGuidanceCatalogEntry< \
         decltype(json_pairs), \
         antithesis::internal::assertions::GUIDEPOST_ALL, \
         antithesis::internal::fixed_string(message), \
