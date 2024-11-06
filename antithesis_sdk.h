@@ -4,6 +4,8 @@
 //
 // Documentation for the SDK is found at https://antithesis.com/docs/using_antithesis/sdk/cpp/overview/.
 
+#ifndef NO_ANTITHESIS_SDK
+
 #if __cplusplus < 202000L
     #error "The Antithesis C++ API requires C++20 or higher"
     #ifndef NO_ANTITHESIS_SDK
@@ -11,15 +13,27 @@
     #endif
 #endif
 
-#if defined(__clang__) && __clang_major__ < 16
-    #error "The Antithesis C++ API requires clang version 16 or higher"
-
+#if !defined(__clang__)
+    #error "The Antithesis C++ API requires a clang compiler"
     #ifndef NO_ANTITHESIS_SDK
         #define NO_ANTITHESIS_SDK
     #endif
 #endif
 
+#if __clang_major__ < 16
+    #error "The Antithesis C++ API requires clang version 16 or higher"
+    #ifndef NO_ANTITHESIS_SDK
+        #define NO_ANTITHESIS_SDK
+    #endif
+#endif
 
+#else
+
+#if __cplusplus < 201700L
+    #error "The Antithesis C++ API (with NO_ANTITHESIS_SDK) requires C++17 or higher"
+#endif
+
+#endif
 
 /*****************************************************************************
  * COMMON
@@ -43,7 +57,7 @@ namespace antithesis {
     struct JSONArray : std::vector<JSONValue> {
         using std::vector<JSONValue>::vector;
 
-        template<typename T, std::enable_if<std::is_convertible<T, JSONValue>::value, bool>::type = true>
+        template<typename T, typename std::enable_if<std::is_convertible<T, JSONValue>::value, bool>::type = true>
         JSONArray(std::vector<T> vals) : std::vector<JSONValue>(vals.begin(), vals.end()) {}
     };
 
