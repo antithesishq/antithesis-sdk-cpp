@@ -8,23 +8,17 @@
 
 #if __cplusplus < 202000L
     #error "The Antithesis C++ API requires C++20 or higher"
-    #ifndef NO_ANTITHESIS_SDK
-        #define NO_ANTITHESIS_SDK
-    #endif
+    #define NO_ANTITHESIS_SDK
 #endif
 
 #if !defined(__clang__)
     #error "The Antithesis C++ API requires a clang compiler"
-    #ifndef NO_ANTITHESIS_SDK
-        #define NO_ANTITHESIS_SDK
-    #endif
+    #define NO_ANTITHESIS_SDK
 #endif
 
 #if __clang_major__ < 16
     #error "The Antithesis C++ API requires clang version 16 or higher"
-    #ifndef NO_ANTITHESIS_SDK
-        #define NO_ANTITHESIS_SDK
-    #endif
+    #define NO_ANTITHESIS_SDK
 #endif
 
 #else
