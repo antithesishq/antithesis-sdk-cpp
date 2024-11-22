@@ -874,18 +874,21 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 #ifdef NO_ANTITHESIS_SDK
 
 #ifndef ANTITHESIS_SDK_ALWAYS_POLYFILL
-#define ANTITHESIS_SDK_ALWAYS_POLYFILL
+    #define ANTITHESIS_SDK_ALWAYS_POLYFILL
 #endif
 
 #ifndef ANTITHESIS_SDK_SOMETIMES_POLYFILL
-#define ANTITHESIS_SDK_SOMETIMES_POLYFILL
+    #define ANTITHESIS_SDK_SOMETIMES_POLYFILL
 #endif
 
+#ifndef ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL
+    #define ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL ANTITHESIS_SDK_ALWAYS_POLYFILL
+#endif
 
 #define ALWAYS(cond, message, ...) \
     ANTITHESIS_SDK_ALWAYS_POLYFILL(cond, message, __VA_ARGS__)
 #define ALWAYS_OR_UNREACHABLE(cond, message, ...) \
-    ANTITHESIS_SDK_ALWAYS_POLYFILL(cond, message, __VA_ARGS__)
+    ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL(cond, message, __VA_ARGS__)
 #define SOMETIMES(cond, message, ...) \
     ANTITHESIS_SDK_SOMETIMES_POLYFILL(cond, message, __VA_ARGS__)
 #define REACHABLE(message, ...) \
