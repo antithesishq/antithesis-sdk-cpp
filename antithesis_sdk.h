@@ -874,15 +874,16 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 #ifdef NO_ANTITHESIS_SDK
 
 #ifndef ANTITHESIS_SDK_ALWAYS_POLYFILL
-    #define ANTITHESIS_SDK_ALWAYS_POLYFILL
+    #define ANTITHESIS_SDK_ALWAYS_POLYFILL(...)
 #endif
 
 #ifndef ANTITHESIS_SDK_SOMETIMES_POLYFILL
-    #define ANTITHESIS_SDK_SOMETIMES_POLYFILL
+    #define ANTITHESIS_SDK_SOMETIMES_POLYFILL(...)
 #endif
 
 #ifndef ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL
-    #define ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL ANTITHESIS_SDK_ALWAYS_POLYFILL
+    #define ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL(...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL(__VA_ARGS__)
 #endif
 
 #define ALWAYS(cond, message, ...) \
@@ -912,15 +913,17 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 #define SOMETIMES_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...) \
     ANTITHESIS_SDK_SOMETIMES_POLYFILL((val <= threshold), message, __VA_ARGS__)
 #define ALWAYS_SOME(pairs, message, ...) \
-    ANTITHESIS_SDK_ALWAYS_POLYFILL([&](){ \
-    for (std::pair<std::string, bool> pair : pairs) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL(([&](){ \
+    std::initializer_list<std::pair<std::string, bool>> ps = pairs; \
+    for (auto const& pair : ps) \
         if (pair.second) return true; \
-    return false; }(), message, __VA_ARGS__)
+    return false; }()), message, __VA_ARGS__)
 #define SOMETIMES_ALL(pairs, message, ...) \
-    ANTITHESIS_SDK_SOMETIMES_POLYFILL([&](){ \
-    for (std::pair<std::string, bool> pair : pairs) \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL(([&](){ \
+    std::initializer_list<std::pair<std::string, bool>> ps = pairs; \
+    for (auto const& pair : ps) \
         if (!pair.second) return false; \
-    return true; }(), message, __VA_ARGS__)
+    return true; }()), message, __VA_ARGS__)
 
 #else
 
