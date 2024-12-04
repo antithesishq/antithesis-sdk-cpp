@@ -533,12 +533,13 @@ namespace antithesis::internal::assertions {
             }
         }
 
-        [[clang::always_inline]] inline void check_assertion(bool cond, const JSON& details) {
+        [[clang::always_inline]] inline void check_assertion(auto&& cond, const JSON& details)
+            requires requires { static_cast<bool>(std::forward<decltype(cond)>(cond)); } {
             #if defined(NO_ANTITHESIS_SDK)
               #error "Antithesis SDK has been disabled"
             #endif
             if (__builtin_expect(state.false_not_seen || state.true_not_seen, false)) {
-                check_assertion_internal(cond, details);
+                check_assertion_internal(static_cast<bool>(std::forward<decltype(cond)>(cond)), details);
             }
         }
 
