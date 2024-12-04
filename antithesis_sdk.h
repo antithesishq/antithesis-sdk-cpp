@@ -8,23 +8,17 @@
 
 #if __cplusplus < 202000L
     #error "The Antithesis C++ API requires C++20 or higher"
-    #ifndef NO_ANTITHESIS_SDK
-        #define NO_ANTITHESIS_SDK
-    #endif
+    #define NO_ANTITHESIS_SDK
 #endif
 
 #if !defined(__clang__)
     #error "The Antithesis C++ API requires a clang compiler"
-    #ifndef NO_ANTITHESIS_SDK
-        #define NO_ANTITHESIS_SDK
-    #endif
+    #define NO_ANTITHESIS_SDK
 #endif
 
 #if __clang_major__ < 16
     #error "The Antithesis C++ API requires clang version 16 or higher"
-    #ifndef NO_ANTITHESIS_SDK
-        #define NO_ANTITHESIS_SDK
-    #endif
+    #define NO_ANTITHESIS_SDK
 #endif
 
 #else
@@ -879,21 +873,57 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 
 #ifdef NO_ANTITHESIS_SDK
 
-#define ALWAYS(cond, message, ...)
-#define ALWAYS_OR_UNREACHABLE(cond, message, ...)
-#define SOMETIMES(cond, message, ...)
-#define REACHABLE(message, ...)
-#define UNREACHABLE(message, ...)
-#define ALWAYS_GREATER_THAN(val, threshold, message, ...)
-#define ALWAYS_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...)
-#define SOMETIMES_GREATER_THAN(val, threshold, message, ...)
-#define SOMETIMES_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...)
-#define ALWAYS_LESS_THAN(val, threshold, message, ...)
-#define ALWAYS_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...)
-#define SOMETIMES_LESS_THAN(val, threshold, message, ...)
-#define SOMETIMES_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...)
-#define ALWAYS_SOME(pairs, message, ...)
-#define SOMETIMES_ALL(pairs, message, ...)
+#ifndef ANTITHESIS_SDK_ALWAYS_POLYFILL
+    #define ANTITHESIS_SDK_ALWAYS_POLYFILL(...)
+#endif
+
+#ifndef ANTITHESIS_SDK_SOMETIMES_POLYFILL
+    #define ANTITHESIS_SDK_SOMETIMES_POLYFILL(...)
+#endif
+
+#ifndef ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL
+    #define ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL(...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL(__VA_ARGS__)
+#endif
+
+#define ALWAYS(cond, message, ...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL(cond, message, __VA_ARGS__)
+#define ALWAYS_OR_UNREACHABLE(cond, message, ...) \
+    ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL(cond, message, __VA_ARGS__)
+#define SOMETIMES(cond, message, ...) \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL(cond, message, __VA_ARGS__)
+#define REACHABLE(message, ...) \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL(true, message, __VA_ARGS__)
+#define UNREACHABLE(message, ...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL(false, message, __VA_ARGS__)
+#define ALWAYS_GREATER_THAN(val, threshold, message, ...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL((val > threshold), message, __VA_ARGS__)
+#define ALWAYS_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL((val >= threshold), message, __VA_ARGS__)
+#define SOMETIMES_GREATER_THAN(val, threshold, message, ...) \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL((val > threshold), message, __VA_ARGS__)
+#define SOMETIMES_GREATER_THAN_OR_EQUAL_TO(val, threshold, message, ...) \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL((val >= threshold), message, __VA_ARGS__)
+#define ALWAYS_LESS_THAN(val, threshold, message, ...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL((val < threshold), message, __VA_ARGS__)
+#define ALWAYS_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL((val <= threshold), message, __VA_ARGS__)
+#define SOMETIMES_LESS_THAN(val, threshold, message, ...) \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL((val < threshold), message, __VA_ARGS__)
+#define SOMETIMES_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...) \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL((val <= threshold), message, __VA_ARGS__)
+#define ALWAYS_SOME(pairs, message, ...) \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL(([&](){ \
+    std::initializer_list<std::pair<std::string, bool>> ps = pairs; \
+    for (auto const& pair : ps) \
+        if (pair.second) return true; \
+    return false; }()), message, __VA_ARGS__)
+#define SOMETIMES_ALL(pairs, message, ...) \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL(([&](){ \
+    std::initializer_list<std::pair<std::string, bool>> ps = pairs; \
+    for (auto const& pair : ps) \
+        if (!pair.second) return false; \
+    return true; }()), message, __VA_ARGS__)
 
 #else
 
