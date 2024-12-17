@@ -875,11 +875,11 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 #ifdef NO_ANTITHESIS_SDK
 
 #ifndef ANTITHESIS_SDK_ALWAYS_POLYFILL
-    #define ANTITHESIS_SDK_ALWAYS_POLYFILL(...)
+    #define ANTITHESIS_SDK_ALWAYS_POLYFILL(...) do {} while (0)
 #endif
 
 #ifndef ANTITHESIS_SDK_SOMETIMES_POLYFILL
-    #define ANTITHESIS_SDK_SOMETIMES_POLYFILL(...)
+    #define ANTITHESIS_SDK_SOMETIMES_POLYFILL(...) do {} while (0)
 #endif
 
 #ifndef ANTITHESIS_SDK_ALWAYS_OR_UNREACHABLE_POLYFILL
