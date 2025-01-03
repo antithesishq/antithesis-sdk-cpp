@@ -982,48 +982,40 @@ ANTITHESIS_NUMERIC_ASSERT_RAW(SOMETIMES_LESS_THAN_OR_EQUAL_TO, antithesis::inter
 
 #define ALWAYS_SOME(pairs, message, ...) \
 do { \
-    bool disjunction = false; \
-    std::vector<std::pair<std::string, bool>> vec_pairs = pairs; \
-    for (std::pair<std::string, bool> pair : vec_pairs) { \
-        if (pair.second) { \
-            disjunction = true; \
-            break; \
-        } \
-    } \
-    ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::ALWAYS_ASSERTION, disjunction, message, __VA_ARGS__ __VA_OPT__(,) pairs); \
-    antithesis::JSON json_pairs = antithesis::JSON(pairs); \
+    ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::ALWAYS_ASSERTION, ( \
+        [](std::initializer_list<std::pair<std::string, bool>> ps){ \
+            for (auto const& pair : ps) \
+                if (pair.second) return true; \
+            return false; }(pairs)), \
+        message, __VA_ARGS__ __VA_OPT__(,) pairs); \
     antithesis::internal::BooleanGuidanceCatalogEntry< \
-        decltype(json_pairs), \
+        antithesis::JSON, \
         antithesis::internal::assertions::GUIDEPOST_NONE, \
         antithesis::internal::fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(json_pairs); \
+    >::guidepost.send_guidance(antithesis::JSON(pairs)); \
 } while (0)
 
 #define SOMETIMES_ALL(pairs, message, ...) \
 do { \
-    bool conjunction = true; \
-    std::vector<std::pair<std::string, bool>> vec_pairs = pairs; \
-    for (std::pair<std::string, bool> pair : vec_pairs) { \
-        if (!pair.second) { \
-            conjunction = false; \
-            break; \
-        } \
-    } \
-    ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::SOMETIMES_ASSERTION, conjunction, message, __VA_ARGS__ __VA_OPT__(,) pairs); \
-    antithesis::JSON json_pairs = antithesis::JSON(pairs); \
+    ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::SOMETIMES_ASSERTION, ( \
+        [](std::initializer_list<std::pair<std::string, bool>> ps){ \
+            for (auto const& pair : ps) \
+                if (!pair.second) return false; \
+            return true; }(pairs)), \
+        message, __VA_ARGS__ __VA_OPT__(,) pairs); \
     antithesis::internal::BooleanGuidanceCatalogEntry< \
-        decltype(json_pairs), \
+        antithesis::JSON, \
         antithesis::internal::assertions::GUIDEPOST_ALL, \
         antithesis::internal::fixed_string(message), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::guidepost.send_guidance(json_pairs); \
+    >::guidepost.send_guidance(antithesis::JSON(pairs)); \
 } while (0)
 
 #endif
