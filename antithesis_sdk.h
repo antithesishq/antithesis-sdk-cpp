@@ -914,17 +914,17 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 #define SOMETIMES_LESS_THAN_OR_EQUAL_TO(val, threshold, message, ...) \
     ANTITHESIS_SDK_SOMETIMES_POLYFILL((val <= threshold), message, __VA_ARGS__)
 #define ALWAYS_SOME(pairs, message, ...) \
-    ANTITHESIS_SDK_ALWAYS_POLYFILL(([&](){ \
-    std::initializer_list<std::pair<std::string, bool>> ps = pairs; \
+    ANTITHESIS_SDK_ALWAYS_POLYFILL(([]( \
+        std::initializer_list<std::pair<std::string, bool>> ps){ \
     for (auto const& pair : ps) \
         if (pair.second) return true; \
-    return false; }()), message, __VA_ARGS__)
+    return false; }(pairs)), message, __VA_ARGS__)
 #define SOMETIMES_ALL(pairs, message, ...) \
-    ANTITHESIS_SDK_SOMETIMES_POLYFILL(([&](){ \
-    std::initializer_list<std::pair<std::string, bool>> ps = pairs; \
+    ANTITHESIS_SDK_SOMETIMES_POLYFILL(([]( \
+        std::initializer_list<std::pair<std::string, bool>> ps){ \
     for (auto const& pair : ps) \
         if (!pair.second) return false; \
-    return true; }()), message, __VA_ARGS__)
+    return true; }(pairs)), message, __VA_ARGS__)
 
 #else
 
