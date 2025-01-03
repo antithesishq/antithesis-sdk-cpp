@@ -42,7 +42,7 @@
 #include <utility>
 
 namespace antithesis {
-    inline const char* SDK_VERSION = "0.4.4";
+    inline const char* SDK_VERSION = "0.4.5";
     inline const char* PROTOCOL_VERSION = "1.1.0";
 
     struct JSON; struct JSONArray;
