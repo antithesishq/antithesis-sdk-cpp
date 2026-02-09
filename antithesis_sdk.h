@@ -2,7 +2,7 @@
 
 // This header file contains the Antithesis C++ SDK, which enables C++ applications to integrate with the [Antithesis platform].
 //
-// Documentation for the SDK is found at https://antithesis.com/docs/using_antithesis/sdk/cpp/overview/.
+// Documentation for the SDK is found at https://antithesis.com/docs/using_antithesis/sdk/cpp/.
 
 #ifndef NO_ANTITHESIS_SDK
 
@@ -42,7 +42,7 @@
 #include <utility>
 
 namespace antithesis {
-    inline const char* SDK_VERSION = "0.4.5";
+    inline const char* SDK_VERSION = "0.4.6";
     inline const char* PROTOCOL_VERSION = "1.1.0";
 
     struct JSON; struct JSONArray;
@@ -675,11 +675,11 @@ namespace antithesis::internal::assertions {
                     // we're negative and the extreme value is positive; never send back
                     return false;
                 } else if (half_gap.second && extreme_half_gap.second) {
-                    // both positive; send back if our absolute value is at least as large
-                    return half_gap.first >= extreme_half_gap.first;
+                    // both positive; send back if our absolute value is larger
+                    return half_gap.first > extreme_half_gap.first;
                 } else {
-                    // both negative; send back if our absolute value is at least as small
-                    return half_gap.first <= extreme_half_gap.first;
+                    // both negative; send back if our absolute value is smaller
+                    return half_gap.first < extreme_half_gap.first;
                 }
             } else {
                 if (half_gap.second && !extreme_half_gap.second) {
@@ -689,11 +689,11 @@ namespace antithesis::internal::assertions {
                     // we're negative and the extreme value is positive; always send back
                     return true;
                 } else if (half_gap.second && extreme_half_gap.second) {
-                    // both positive; send back if our absolute value is at least as small
-                    return half_gap.first <= extreme_half_gap.first;
+                    // both positive; send back if our absolute value is smaller
+                    return half_gap.first < extreme_half_gap.first;
                 } else {
-                    // both negative; send back if our absolute value is at least as large
-                    return half_gap.first >= extreme_half_gap.first;
+                    // both negative; send back if our absolute value is larger
+                    return half_gap.first > extreme_half_gap.first;
                 }
             }
         }
