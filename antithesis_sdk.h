@@ -42,7 +42,7 @@
 #include <utility>
 
 namespace antithesis {
-    inline const char* SDK_VERSION = "0.4.6";
+    inline const char* SDK_VERSION = "0.4.7";
     inline const char* PROTOCOL_VERSION = "1.1.0";
 
     struct JSON; struct JSONArray;
@@ -605,16 +605,16 @@ namespace antithesis::internal::assertions {
         const char* message;
         LocationInfo location;
         GuidepostType type;
-        // an approximation of (left - right) / 2; contains an absolute value and a sign bit
-        std::pair<NumericValue, bool> extreme_half_gap;
+        // (left - right)
+        double extreme_gap;
 
         NumericGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
             message(message), location(std::move(location)), type(type) {
                 this->add_to_catalog();
                 if (type == GUIDEPOST_MAXIMIZE) {
-                    extreme_half_gap = { std::numeric_limits<NumericValue>::max(), false }; 
+                    extreme_gap = -1.0 * std::numeric_limits<double>::max();
                 } else {
-                    extreme_half_gap = { std::numeric_limits<NumericValue>::max(), true };
+                    extreme_gap = std::numeric_limits<double>::max();
                 }
             }
 
@@ -633,75 +633,18 @@ namespace antithesis::internal::assertions {
             get_lib_handler().output(catalog);
         }
 
-        std::pair<NumericValue, bool> compute_half_gap(NumericValue left, NumericValue right) {
-            // An extremely baroque way to compute (left - right) / 2, rounded toward 0, without overflowing or underflowing
-            if (std::is_integral_v<NumericValue>) {
-                // If both numbers are odd then the gap doesn't change if we subtract 1 from both sides
-                // Also subtracting 1 from both sides won't underflow
-                if (left % 2 == 1 && right % 2 == 1) 
-                    return compute_half_gap( left - 1, right - 1);
-                // If one number is odd then we subtract 1 from the larger number
-                // This rounds the computation toward 0 but again won't underflow
-                if (left % 2 == 1 || right % 2 == 1) {
-                    if (left > right) {
-                        return compute_half_gap( left - 1, right );
-                    } else {
-                        return compute_half_gap( left, right - 1 );
-                    }
-                }
-                // At this point both numbers are even, so the midpoint calculation is exact
-                NumericValue half_left = left / 2;
-                NumericValue half_right = right / 2;
-                NumericValue midpoint = half_left + half_right;
-                // This won't overflow or underflow because we're subtracting the midpoint
-                // We compute a positive value and a sign so that we don't have to do weird things with unsigned types
-                if (left > right) {
-                    return { midpoint - right, true };
-                } else {
-                    return { right - midpoint, false };
-                }
-            } else {
-                // If it's floating point we don't need to worry about overflowing, just do the arithmetic
-                return { left > right ? (left - right) / 2 : (right - left) / 2, left > right };
-            }
-        }
-
-        bool should_send_value(std::pair<NumericValue, bool> half_gap) {
+        bool should_send_value(double gap) {
             if (this->type == GUIDEPOST_MAXIMIZE) {
-                if (half_gap.second && !extreme_half_gap.second) {
-                    // we're positive and the extreme value isn't; always send back
-                    return true;
-                } else if (!half_gap.second && extreme_half_gap.second) {
-                    // we're negative and the extreme value is positive; never send back
-                    return false;
-                } else if (half_gap.second && extreme_half_gap.second) {
-                    // both positive; send back if our absolute value is larger
-                    return half_gap.first > extreme_half_gap.first;
-                } else {
-                    // both negative; send back if our absolute value is smaller
-                    return half_gap.first < extreme_half_gap.first;
-                }
+                return gap > extreme_gap;
             } else {
-                if (half_gap.second && !extreme_half_gap.second) {
-                    // we're positive and the extreme value isn't; never send back
-                    return false;
-                } else if (!half_gap.second && extreme_half_gap.second) {
-                    // we're negative and the extreme value is positive; always send back
-                    return true;
-                } else if (half_gap.second && extreme_half_gap.second) {
-                    // both positive; send back if our absolute value is smaller
-                    return half_gap.first < extreme_half_gap.first;
-                } else {
-                    // both negative; send back if our absolute value is larger
-                    return half_gap.first > extreme_half_gap.first;
-                }
+                return gap < extreme_gap;
             }
         }
 
         [[clang::always_inline]] inline void send_guidance(Value value) {
-            std::pair<NumericValue, bool> half_gap = compute_half_gap(value.first, value.second);
-            if (should_send_value(half_gap)) {
-                extreme_half_gap = half_gap;
+            double gap = static_cast<double>(value.first) - static_cast<double>(value.second);
+            if (should_send_value(gap)) {
+                extreme_gap = gap;
                 std::string id = make_key(this->message, this->location);
                 JSON guidance{
                     {"antithesis_guidance", JSON{
