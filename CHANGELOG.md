@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.8 - 2026-05-06
+
+Updates to instrumentation:
+* Support for compiling (instrumentation, not SDK) with g++, gcc, and cc
+* Use reinterpret_cast for C++ casts to avoid warnings
+* Debug printing now goes to stderr, and only if you're in Antithesis
+* Removing some unused #includes
+
 ## 0.4.7 - 2026-02-13
 
 Simplify numeric guidance internals. This fixes a bug where certain numeric comparisons could produce incorrect guidance results.

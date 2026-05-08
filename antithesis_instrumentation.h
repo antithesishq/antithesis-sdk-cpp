@@ -10,17 +10,27 @@ You should include it in a single .cpp or .c file.
 The instructions (such as required compiler flags) and usage guidance are found at https://antithesis.com/docs/using_antithesis/sdk/cpp/overview/.
 */
 
-#include <unistd.h>
-#include <string.h>
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #ifndef __cplusplus
 #include <stdbool.h>
-#include <stddef.h>
 #endif
 
-// If the libvoidstar(determ) library is present, 
+#if defined(__clang__)
+#define ANTITHESIS_NO_SANITIZE_COVERAGE __attribute__((no_sanitize("coverage")))
+#else
+#define ANTITHESIS_NO_SANITIZE_COVERAGE
+#endif
+
+#ifdef __cplusplus
+#define ANTITHESIS_REINTERPRET_CAST(T, x) reinterpret_cast<T>(x)
+#else
+#define ANTITHESIS_REINTERPRET_CAST(T, x) ((T)(x))
+#endif
+
+// If the libvoidstar(determ) library is present,
 // pass thru trace_pc_guard related callbacks to it
 typedef void (*trace_pc_guard_init_fn)(uint32_t *start, uint32_t *stop);
 typedef void (*trace_pc_guard_fn)(uint32_t *guard, uint64_t edge);
@@ -30,16 +40,18 @@ static trace_pc_guard_fn trace_pc_guard = NULL;
 static bool did_check_libvoidstar = false;
 static bool has_libvoidstar = false;
 
-static __attribute__((no_sanitize("coverage"))) void debug_message_out(const char *msg) {
-  (void)printf("%s\n", msg);
-  return;
+static ANTITHESIS_NO_SANITIZE_COVERAGE void debug_message_out(const char *msg) {
+  bool is_in_antithesis = getenv("ANTITHESIS_OUTPUT_DIR") != NULL;
+  if (is_in_antithesis) {
+    (void)fprintf(stderr, "%s\n", msg);
+  }
 }
 
 extern
 #ifdef __cplusplus
     "C"
 #endif
-__attribute__((no_sanitize("coverage"))) void antithesis_load_libvoidstar() {
+ANTITHESIS_NO_SANITIZE_COVERAGE void antithesis_load_libvoidstar() {
 #ifdef __cplusplus
     constexpr
 #endif
@@ -68,19 +80,21 @@ __attribute__((no_sanitize("coverage"))) void antithesis_load_libvoidstar() {
         return;
     }
 
-    trace_pc_guard_init = (trace_pc_guard_init_fn)(trace_pc_guard_init_sym);
-    trace_pc_guard = (trace_pc_guard_fn)(trace_pc_guard_sym);
+    trace_pc_guard_init = ANTITHESIS_REINTERPRET_CAST(trace_pc_guard_init_fn, trace_pc_guard_init_sym);
+    trace_pc_guard      = ANTITHESIS_REINTERPRET_CAST(trace_pc_guard_fn,      trace_pc_guard_sym);
     has_libvoidstar = true;
     debug_message_out("LOADED libvoidstar");
 }
 
 // The following symbols are indeed reserved identifiers, since we're implementing functions defined
 // in the compiler runtime. Not clear how to get Clang on board with that besides narrowly suppressing
-// the warning in this case. The sample code on the CoverageSanitizer documentation page fails this 
+// the warning in this case. The sample code on the CoverageSanitizer documentation page fails this
 // warning!
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wreserved-identifier"
-extern 
+#endif
+extern
 #ifdef __cplusplus
     "C"
 #endif
@@ -101,7 +115,7 @@ extern
 #endif
 void __sanitizer_cov_trace_pc_guard( uint32_t *guard ) {
     if (has_libvoidstar) {
-        uint64_t edge = (uint64_t)(__builtin_return_address(0));
+        uint64_t edge = ANTITHESIS_REINTERPRET_CAST(uint64_t, __builtin_return_address(0));
         trace_pc_guard(guard, edge);
     } else {
         if (guard) {
@@ -110,4 +124,6 @@ void __sanitizer_cov_trace_pc_guard( uint32_t *guard ) {
     }
     return;
 }
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
