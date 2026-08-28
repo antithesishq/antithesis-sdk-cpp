@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 - 2026-08-28
+
+Fix a number of small concurrency bugs found with TSAN.
+
+Remove small modulo bias from `random_choice`.
+
+When used in local debug mode, the output file (`ANTITHESIS_SDK_LOCAL_OUTPUT`) will no longer be truncated at initialization.
+
+`JSONValue` gains `unsigned` and `int64_t` alternatives, so all standard integer types now convert to it exactly and unambiguously.
+
+Floating-point values in JSON output are now serialized at full round-trip precision (previously they were truncated to 6 significant digits).
+
+`antithesis::internal::assertions::assert_raw` now tracks assertions per id and emits a sample of passing and failing examples (like the other SDKs).
+
 ## 0.4.8 - 2026-05-06
 
 Updates to instrumentation:

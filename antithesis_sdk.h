@@ -33,20 +33,22 @@
  * COMMON
  *****************************************************************************/
 
+#include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <map>
-#include <set>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 #include <utility>
 
 namespace antithesis {
-    inline const char* SDK_VERSION = "0.4.8";
+    inline const char* SDK_VERSION = "0.5.0";
     inline const char* PROTOCOL_VERSION = "1.1.0";
 
     struct JSON; struct JSONArray;
-    typedef std::variant<JSON, std::nullptr_t, std::string, bool, char, int, uint64_t, float, double, const char*, JSONArray> JSONValue;
+    typedef std::variant<JSON, std::nullptr_t, std::string, bool, char, int, unsigned, int64_t, uint64_t, float, double, const char*, JSONArray> JSONValue;
 
     struct JSONArray : std::vector<JSONValue> {
         using std::vector<JSONValue>::vector;
@@ -100,11 +102,21 @@ namespace antithesis::internal::random {
 #ifndef NO_ANTITHESIS_SDK
 
 #include <array>
+#include <charconv>
 #include <iomanip>
 
 namespace antithesis::internal::json {
     template<class>
     inline constexpr bool always_false_v = false;
+
+    // Floating-point values are serialized with std::to_chars, which
+    // produces the shortest representation that round-trips exactly;
+    template<typename F>
+    static void write_float(std::ostream& out, F value) {
+        std::array<char, 64> buffer;
+        std::to_chars_result result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+        out.write(buffer.data(), result.ptr - buffer.data());
+    }
 
     static std::ostream& operator<<(std::ostream& out, const JSON& details);
 
@@ -144,12 +156,16 @@ namespace antithesis::internal::json {
                 out << '"';
             } else if constexpr (std::is_same_v<T, int>) {
                 out << arg;
+            } else if constexpr (std::is_same_v<T, unsigned>) {
+                out << arg;
+            } else if constexpr (std::is_same_v<T, int64_t>) {
+                out << arg;
             } else if constexpr (std::is_same_v<T, uint64_t>) {
                 out << arg;
             } else if constexpr (std::is_same_v<T, float>) {
-                out << arg;
+                write_float(out, arg);
             } else if constexpr (std::is_same_v<T, double>) {
-                out << arg;
+                write_float(out, arg);
             } else if constexpr (std::is_same_v<T, const char*>) {
                 out << '"';
                 for (auto str = arg; *str != '\0'; str++) {
@@ -310,11 +326,16 @@ namespace antithesis::internal::handlers {
 
         void output(const char* message) const override {
             if (file != nullptr && message != nullptr) {
-                fprintf(file, "%s\n", message);
+                std::string line(message);
+                line.push_back('\n');
+                // Using `fwrite` and a manually appended newline instead of `fprintf` because the latter will split writes in 4KB chunks,
+                // whereas the former sends the whole line as a single `write(2)` syscall
+                fwrite(line.data(), 1, line.size(), file);
             }
         }
 
         uint64_t random() override {
+            thread_local antithesis::internal::random::LocalRandom random_gen;
             return random_gen.random();
         }
 
@@ -323,12 +344,11 @@ namespace antithesis::internal::handlers {
         }
     private:
         FILE* file;
-        antithesis::internal::random::LocalRandom random_gen;
 
-        LocalHandler(FILE* file): file(file), random_gen() {
+        LocalHandler(FILE* file): file(file) {
         }
 
-        // If `localOutputEnvVar` is set to a non-empty path, attempt to open that path and truncate the file
+        // If `localOutputEnvVar` is set to a non-empty path, attempt to open that path for appending
         // to serve as the log file of the local handler.
         // Otherwise, we don't have a log file, and logging is a no-op in the local handler.
         static FILE* create_internal() {
@@ -337,11 +357,15 @@ namespace antithesis::internal::handlers {
                 return nullptr;
             }
 
-            // Open the file for writing (create if needed and possible) and truncate it
-            FILE* file = fopen(path, "w");
+            // Open the file for writing (create if needed and possible) in append mode
+            FILE* file = fopen(path, "a");
             if (file == nullptr) {
                 fprintf(stderr, "%s Failed to open path %s: %s\n", ERROR_LOG_LINE_PREFIX, path, strerror(errno));
                 return nullptr;
+            }
+            // Set the buffer length to 0 so that each fwrite in output() reaches the file as a single write(2) whatever its size.
+            if (setvbuf(file, nullptr, _IONBF, 0) != 0) {
+                fprintf(stderr, "%s Failed to make output at %s unbuffered; records larger than the stream buffer may interleave with other writers\n", ERROR_LOG_LINE_PREFIX, path);
             }
             int ret = fchmod(fileno(file), 0644);
             if (ret != 0) {
@@ -369,9 +393,8 @@ namespace antithesis::internal::handlers {
     }
 
     inline LibHandler& get_lib_handler() {
-        static LibHandler* lib_handler = nullptr;
-        if (lib_handler == nullptr) {
-            lib_handler = init().release(); // Leak on exit, rather than exit-time-destructor
+        static LibHandler& lib_handler = *[]() {
+            LibHandler* handler = init().release();
 
             JSON language_block{
               {"name", "C++"},
@@ -385,10 +408,11 @@ namespace antithesis::internal::handlers {
                     {"protocol_version", PROTOCOL_VERSION}
                 }
             }};
-            lib_handler->output(version_message);
-        }
+            handler->output(version_message);
+            return handler;
+        }();
 
-        return *lib_handler;
+        return lib_handler;
     }
 }
 
@@ -404,11 +428,10 @@ namespace antithesis::internal::assertions {
     using namespace antithesis::internal::handlers;
 
     struct AssertionState {
-        uint8_t false_not_seen : 1;
-        uint8_t true_not_seen : 1;
-        uint8_t rest : 6;
+        std::atomic<bool> false_not_seen;
+        std::atomic<bool> true_not_seen;
 
-        AssertionState() : false_not_seen(true), true_not_seen(true), rest(0)  {}
+        AssertionState() : false_not_seen(true), true_not_seen(true) {}
     };
 
     enum AssertionType {
@@ -494,18 +517,32 @@ namespace antithesis::internal::assertions {
         antithesis::internal::handlers::get_lib_handler().output(assertion);
     }
 
-    inline void assert_raw(bool cond, const char* message, const JSON& details, 
-                            const char* class_name, const char* function_name, const char* file_name, const int line, const int column,     
-                            bool hit, bool must_hit, const char* assert_type, const char* display_type, const char* id) {
-        LocationInfo location_info{ class_name, function_name, file_name, line, column };
-        assert_impl(cond, message, details, location_info, hit, must_hit, assert_type, display_type, id);
+    struct TrackedAssertion {
+        std::atomic<bool> registered{false};
+        AssertionState state;
+    };
+
+    inline TrackedAssertion& tracked_assertion(const std::string& id) {
+        [[clang::no_destroy]] static std::mutex mutex;
+        [[clang::no_destroy]] static std::unordered_map<std::string, TrackedAssertion> tracker;
+        std::lock_guard<std::mutex> lock(mutex);
+        return tracker[id];
     }
 
-    typedef std::set<std::string> CatalogEntryTracker;
+    inline bool raw_assert_gate(bool cond, const char* id) {
+        AssertionState& state = tracked_assertion(id).state;
+        std::atomic<bool>& not_seen = cond ? state.true_not_seen : state.false_not_seen;
+        return not_seen.exchange(false, std::memory_order_relaxed);
+    }
 
-    inline CatalogEntryTracker& get_catalog_entry_tracker() {
-        static CatalogEntryTracker catalog_entry_tracker;
-        return catalog_entry_tracker;
+    inline void assert_raw(bool cond, const char* message, const JSON& details,
+                            const char* class_name, const char* function_name, const char* file_name, const int line, const int column,
+                            bool hit, bool must_hit, const char* assert_type, const char* display_type, const char* id) {
+        if (hit && !raw_assert_gate(cond, id)) {
+            return;
+        }
+        LocationInfo location_info{ class_name, function_name, file_name, line, column };
+        assert_impl(cond, message, details, location_info, hit, must_hit, assert_type, display_type, id);
     }
 
     struct Assertion {
@@ -521,16 +558,16 @@ namespace antithesis::internal::assertions {
 
         void add_to_catalog() const {
             std::string id = make_key(message, location);
-            CatalogEntryTracker& tracker = get_catalog_entry_tracker();
-            if (!tracker.contains(id)) {
-                tracker.insert(id);
-                const bool condition = (type == REACHABLE_ASSERTION ? true : false);
-                const bool hit = false;
-                const char* assert_type = get_assert_type_string(type);
-                const bool must_hit = get_must_hit(type);
-                const char* display_type = get_display_type_string(type);
-                assert_impl(condition, message, {}, location, hit, must_hit, assert_type, display_type, id.c_str());
+
+            if (tracked_assertion(id).registered.exchange(true, std::memory_order_relaxed)) {
+                return;
             }
+            const bool condition = (type == REACHABLE_ASSERTION ? true : false);
+            const bool hit = false;
+            const char* assert_type = get_assert_type_string(type);
+            const bool must_hit = get_must_hit(type);
+            const char* display_type = get_display_type_string(type);
+            assert_impl(condition, message, {}, location, hit, must_hit, assert_type, display_type, id.c_str());
         }
 
         [[clang::always_inline]] inline void check_assertion(auto&& cond, const JSON& details)
@@ -538,22 +575,24 @@ namespace antithesis::internal::assertions {
             #if defined(NO_ANTITHESIS_SDK)
               #error "Antithesis SDK has been disabled"
             #endif
-            if (__builtin_expect(state.false_not_seen || state.true_not_seen, false)) {
+            if (__builtin_expect(state.false_not_seen.load(std::memory_order_relaxed)
+                    || state.true_not_seen.load(std::memory_order_relaxed), false)) {
                 check_assertion_internal(static_cast<bool>(std::forward<decltype(cond)>(cond)), details);
             }
         }
 
         private:
         void check_assertion_internal(bool cond, const JSON& details) {
+            // exchange() rather than read-then-write: exactly one of any
+            // racing first evaluations wins each flag, so an assertion
+            // cannot emit twice for one condition.
             bool emit = false;
-            if (!cond && state.false_not_seen) {
+            if (!cond && state.false_not_seen.exchange(false, std::memory_order_relaxed)) {
                 emit = true;
-                state.false_not_seen = false;   // TODO: is the race OK?
             }
 
-            if (cond && state.true_not_seen) {
+            if (cond && state.true_not_seen.exchange(false, std::memory_order_relaxed)) {
                 emit = true;
-                state.true_not_seen = false;   // TODO: is the race OK?
             }
 
             if (emit) {
@@ -605,8 +644,8 @@ namespace antithesis::internal::assertions {
         const char* message;
         LocationInfo location;
         GuidepostType type;
-        // (left - right)
-        double extreme_gap;
+        std::atomic<double> extreme_gap;
+        std::mutex extreme_gap_mutex;
 
         NumericGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
             message(message), location(std::move(location)), type(type) {
@@ -634,17 +673,22 @@ namespace antithesis::internal::assertions {
         }
 
         bool should_send_value(double gap) {
+            double current = extreme_gap.load(std::memory_order_relaxed);
             if (this->type == GUIDEPOST_MAXIMIZE) {
-                return gap > extreme_gap;
+                return gap > current;
             } else {
-                return gap < extreme_gap;
+                return gap < current;
             }
         }
 
         [[clang::always_inline]] inline void send_guidance(Value value) {
             double gap = static_cast<double>(value.first) - static_cast<double>(value.second);
+            if (!should_send_value(gap)) {
+                return;
+            }
+            std::lock_guard<std::mutex> lock(extreme_gap_mutex);
             if (should_send_value(gap)) {
-                extreme_gap = gap;
+                extreme_gap.store(gap, std::memory_order_relaxed);
                 std::string id = make_key(this->message, this->location);
                 JSON guidance{
                     {"antithesis_guidance", JSON{
@@ -1010,7 +1054,7 @@ namespace antithesis {
 
 namespace antithesis {
     inline uint64_t get_random() {
-        static antithesis::internal::random::LocalRandom random_gen;
+        thread_local antithesis::internal::random::LocalRandom random_gen;
         return random_gen.random();
     }
 }
@@ -1033,7 +1077,15 @@ namespace antithesis {
             return end;
         }
 
+        if (num_things == 1) {
+            return begin;
+        }
+
+        uint64_t ceiling = (UINT64_MAX / num_things) * num_things;
         uint64_t uval = get_random();
+        while (uval >= ceiling) {
+            uval = get_random();
+        }
         ssize_t index = uval % num_things;
         return begin + index;
     }
