@@ -2,7 +2,7 @@
   with pkgs;
   stdenv.mkDerivation {
     pname = "antithesis-sdk-cpp";
-    version = "0.4.3";
+    version = (import ../../versions.nix { inherit (pkgs) lib; }).cpp.sdk_version;
 
     src = ./.;
 

@@ -38,13 +38,14 @@
 #include <mutex>
 #include <string>
 #include <map>
+#include <stdexcept>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 #include <utility>
 
 namespace antithesis {
-    inline const char* SDK_VERSION = "0.5.0";
+    inline const char* SDK_VERSION = "0.5.1";
     inline const char* PROTOCOL_VERSION = "1.1.0";
 
     struct JSON; struct JSONArray;
@@ -103,19 +104,37 @@ namespace antithesis::internal::random {
 
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <iomanip>
+#include <algorithm>
+#include <limits>
+#include <optional>
+#include <span>
+#include <string_view>
 
 namespace antithesis::internal::json {
     template<class>
     inline constexpr bool always_false_v = false;
 
     // Floating-point values are serialized with std::to_chars, which
-    // produces the shortest representation that round-trips exactly;
+    // produces the shortest representation that round-trips exactly.
     template<typename F>
     static void write_float(std::ostream& out, F value) {
+        if (!std::isfinite(value)) {
+            out << (std::isnan(value) ? "\"NaN\"" : value > 0 ? "\"Infinity\"" : "\"-Infinity\"");
+            return;
+        }
         std::array<char, 64> buffer;
         std::to_chars_result result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
         out.write(buffer.data(), result.ptr - buffer.data());
+        for (const char* c = buffer.data(); c != result.ptr; c++) {
+            if ((*c < '0' || *c > '9') && *c != '-') {
+                return;
+            }
+        }
+        // Preserve the floating-point type for consumers that distinguish JSON
+        // integer tokens, including -0 whose sign would otherwise be lost.
+        out.write(".0", 2);
     }
 
     static std::ostream& operator<<(std::ostream& out, const JSON& details);
@@ -199,7 +218,7 @@ namespace antithesis::internal::json {
         out << '{';
 
         bool first = true;
-        for (auto [key, value] : details) {
+        for (const auto& [key, value] : details) {
             if (!first) {
                 out << ',';
             }
@@ -214,6 +233,132 @@ namespace antithesis::internal::json {
         out << '}';
         return out;
     }
+
+    struct ObjectView {
+        const JSON* object = nullptr;
+        std::span<const JSON::value_type> fields;
+        std::span<const JSON::value_type> additional;
+    };
+
+    template<typename F>
+    static void for_each_field(const ObjectView& view, F&& visit) {
+        if (view.object != nullptr && view.additional.empty()) {
+            for (const auto& [key, value] : *view.object) visit(key, value);
+            return;
+        }
+        std::vector<const JSON::value_type*> fields;
+        fields.reserve((view.object != nullptr ? view.object->size() : view.fields.size()) + view.additional.size());
+        // Stable sorting keeps the last added value first for each key, so
+        // overwritten values are neither serialized nor scanned for warnings.
+        for (auto it = view.additional.rbegin(); it != view.additional.rend(); ++it) {
+            fields.push_back(&*it);
+        }
+        if (view.object != nullptr) {
+            for (const auto& field : *view.object) fields.push_back(&field);
+        } else {
+            for (const auto& field : view.fields) fields.push_back(&field);
+        }
+        std::stable_sort(fields.begin(), fields.end(), [](const auto* left, const auto* right) {
+            return left->first < right->first;
+        });
+        const std::string* previous = nullptr;
+        for (const auto* field : fields) {
+            const auto& [key, value] = *field;
+            if (previous != nullptr && *previous == key) continue;
+            visit(key, value);
+            previous = &key;
+        }
+    }
+
+    static std::ostream& operator<<(std::ostream& out, const ObjectView& view) {
+        out << '{';
+        bool first = true;
+        for_each_field(view, [&](const std::string& key, const JSONValue& value) {
+            if (!first) out << ',';
+            first = false;
+            out << '"';
+            for (char c : key) escaped(out, c);
+            out << '"' << ':' << value;
+        });
+        return out << '}';
+    }
+
+    struct DetailsWarnings {
+        bool non_finite = false;
+        bool unsafe_integer = false;
+
+        void scan(const JSONValue& value) {
+            std::visit([&](const auto& arg) {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, JSON>) {
+                    scan(arg);
+                } else if constexpr (std::is_same_v<T, JSONArray>) {
+                    for (const auto& item : arg) scan(item);
+                } else if constexpr (std::is_floating_point_v<T>) {
+                    non_finite |= !std::isfinite(arg);
+                } else if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>) {
+                    unsafe_integer |= beyond_safe_range(arg);
+                }
+            }, value);
+        }
+
+        void scan(const JSON& object) {
+            for (const auto& [key, value] : object) scan(value);
+        }
+
+        void scan(const ObjectView& view) {
+            for_each_field(view, [&](const std::string&, const JSONValue& value) { scan(value); });
+        }
+
+    private:
+        template<typename I>
+        static bool beyond_safe_range(I n) {
+            constexpr int64_t limit = int64_t{1} << 53;
+            if constexpr (std::is_signed_v<I>) {
+                return n >= limit || n <= -limit;
+            } else {
+                return n >= static_cast<uint64_t>(limit);
+            }
+        }
+    };
+
+    static void write_string(std::ostream& out, std::string_view value) {
+        out << '"';
+        for (char c : value) escaped(out, c);
+        out << '"';
+    }
+
+    inline void write_value(std::ostream& out, const JSONValue& value) { out << value; }
+    inline void write_value(std::ostream& out, const JSON& value) { out << value; }
+    inline void write_value(std::ostream& out, const ObjectView& value) { out << value; }
+    inline void write_value(std::ostream& out, const std::string& value) { write_string(out, value); }
+    inline void write_value(std::ostream& out, const char* value) { write_string(out, value); }
+
+    template<typename F> requires std::is_invocable_v<const F&, std::ostream&>
+    void write_value(std::ostream& out, const F& write) { write(out); }
+
+    struct ObjectWriter {
+        std::ostream& out;
+        bool first = true;
+
+        template<typename T>
+        void field(std::string_view name, const T& value) {
+            if (!first) out << ',';
+            first = false;
+            write_string(out, name);
+            out << ':';
+            write_value(out, value);
+        }
+    };
+
+    template<typename F>
+    void write_object(std::ostream& out, F&& fields) {
+        out << '{';
+        ObjectWriter writer{out};
+        fields(writer);
+        out << '}';
+    }
+
 }
 
 #endif
@@ -246,22 +391,25 @@ namespace antithesis::internal::handlers {
     
     struct LibHandler {
         virtual ~LibHandler() = default;
-        virtual void output(const char* message) const = 0;
+        virtual void output(std::string message) const = 0;
         virtual uint64_t random() = 0;
 
-        void output(const JSON& json) const {
+        template<typename F>
+        void output_json(F&& write) const {
             std::ostringstream out;
-            out << json;
-            output(out.str().c_str());
+            write(out);
+            output(std::move(out).str());
+        }
+
+        void output(const JSON& json) const {
+            output_json([&](std::ostream& out) { out << json; });
         }
     };
 
     struct AntithesisHandler : LibHandler {
-        void output(const char* message) const override {
-            if (message != nullptr) {
-                fuzz_json_data(message, strlen(message));
-                fuzz_flush();
-            }
+        void output(std::string message) const override {
+            fuzz_json_data(message.data(), message.size());
+            fuzz_flush();
         }
 
         uint64_t random() override {
@@ -324,13 +472,12 @@ namespace antithesis::internal::handlers {
             }
         }
 
-        void output(const char* message) const override {
-            if (file != nullptr && message != nullptr) {
-                std::string line(message);
-                line.push_back('\n');
+        void output(std::string message) const override {
+            if (file != nullptr) {
+                message.push_back('\n');
                 // Using `fwrite` and a manually appended newline instead of `fprintf` because the latter will split writes in 4KB chunks,
                 // whereas the former sends the whole line as a single `write(2)` syscall
-                fwrite(line.data(), 1, line.size(), file);
+                fwrite(message.data(), 1, message.size(), file);
             }
         }
 
@@ -414,6 +561,44 @@ namespace antithesis::internal::handlers {
 
         return lib_handler;
     }
+
+    inline void output_warning(int code, const std::string& message, const char* context) {
+        get_lib_handler().output_json([&](std::ostream& out) {
+            write_object(out, [&](auto& event) {
+                event.field("antithesis_warning", [&](std::ostream& out) {
+                    write_object(out, [&](auto& warning) {
+                        warning.field("code", code);
+                        warning.field("context", context);
+                        warning.field("message", message);
+                    });
+                });
+            });
+        });
+    }
+
+    inline std::atomic<bool> non_finite_reported{false};
+    inline std::atomic<bool> unsafe_integer_reported{false};
+    inline std::atomic<bool> non_finite_operand_reported{false};
+
+    template<typename Details>
+    inline void output_details_warnings(const Details& details, const char* context) {
+        DetailsWarnings warnings;
+        warnings.scan(details);
+        if (warnings.non_finite && !non_finite_reported.exchange(true, std::memory_order_relaxed)) {
+            output_warning(6002, std::string("C++ SDK replaced non-finite numbers in details for \"") + context
+                + "\" with the strings \"NaN\", \"Infinity\" or \"-Infinity\"; later occurrences in this process are not reported", context);
+        }
+        if (warnings.unsafe_integer && !unsafe_integer_reported.exchange(true, std::memory_order_relaxed)) {
+            output_warning(6003, std::string("C++ SDK emitted integers beyond ±2^53 in details for \"") + context
+                + "\"; consumers that parse JSON numbers as doubles will round them; later occurrences in this process are not reported", context);
+        }
+    }
+
+    inline void output_non_finite_guidance_warning(const char* id) {
+        if (non_finite_operand_reported.exchange(true, std::memory_order_relaxed)) return;
+        output_warning(6004, std::string("C++ SDK skipped numeric guidance for \"") + id
+            + "\" because an operand was not finite; later occurrences in this process are not reported", id);
+    }
 }
 
 #endif
@@ -484,14 +669,14 @@ namespace antithesis::internal::assertions {
         const int line;
         const int column;
 
-        JSON to_json() const {
-            return JSON{
-                {"class", class_name},
-                {"function", function_name},
-                {"file", file_name},
-                {"begin_line", line},
-                {"begin_column", column},
-            };
+        void write_json(std::ostream& out) const {
+            json::write_object(out, [&](auto& object) {
+                object.field("begin_column", column);
+                object.field("begin_line", line);
+                object.field("class", class_name);
+                object.field("file", file_name);
+                object.field("function", function_name);
+            });
         }
     };
 
@@ -499,22 +684,26 @@ namespace antithesis::internal::assertions {
         return message;
     }
 
-    inline void assert_impl(bool cond, const char* message, const JSON& details, const LocationInfo& location_info,
+    inline void assert_impl(bool cond, const char* message, const json::ObjectView* details, const LocationInfo& location_info,
                     bool hit, bool must_hit, const char* assert_type, const char* display_type, const char* id) {
-        JSON assertion{
-            {"antithesis_assert", JSON{
-                {"hit", hit},
-                {"must_hit", must_hit},
-                {"assert_type", assert_type},
-                {"display_type", display_type},
-                {"message", message},
-                {"condition", cond},
-                {"id", id},
-                {"location", location_info.to_json()},
-                {"details", details},
-            }}
-        };
-        antithesis::internal::handlers::get_lib_handler().output(assertion);
+        if (hit && details != nullptr) output_details_warnings(*details, id);
+        get_lib_handler().output_json([&](std::ostream& out) {
+            json::write_object(out, [&](auto& event) {
+                event.field("antithesis_assert", [&](std::ostream& out) {
+                    json::write_object(out, [&](auto& assertion) {
+                        assertion.field("assert_type", assert_type);
+                        assertion.field("condition", cond);
+                        if (hit && details != nullptr) assertion.field("details", *details);
+                        assertion.field("display_type", display_type);
+                        assertion.field("hit", hit);
+                        assertion.field("id", id);
+                        assertion.field("location", [&](std::ostream& out) { location_info.write_json(out); });
+                        assertion.field("message", message);
+                        assertion.field("must_hit", must_hit);
+                    });
+                });
+            });
+        });
     }
 
     struct TrackedAssertion {
@@ -535,14 +724,34 @@ namespace antithesis::internal::assertions {
         return not_seen.exchange(false, std::memory_order_relaxed);
     }
 
-    inline void assert_raw(bool cond, const char* message, const JSON& details,
+    inline void assert_raw_impl(bool cond, const char* message, const JSON* details,
                             const char* class_name, const char* function_name, const char* file_name, const int line, const int column,
-                            bool hit, bool must_hit, const char* assert_type, const char* display_type, const char* id) {
+                            bool hit, bool must_hit, const char* assert_type, const char* display_type, const char* id,
+                            std::optional<std::span<const JSON::value_type>> guidance) {
         if (hit && !raw_assert_gate(cond, id)) {
             return;
         }
         LocationInfo location_info{ class_name, function_name, file_name, line, column };
-        assert_impl(cond, message, details, location_info, hit, must_hit, assert_type, display_type, id);
+        json::ObjectView view{details, {}, guidance.value_or(std::span<const JSON::value_type>{})};
+        const bool present = details != nullptr || guidance.has_value();
+        assert_impl(cond, message, present ? &view : nullptr, location_info,
+                    hit, must_hit, assert_type, display_type, id);
+    }
+
+    inline void assert_raw(bool cond, const char* message, const JSON& details,
+                            const char* class_name, const char* function_name, const char* file_name, const int line, const int column,
+                            bool hit, bool must_hit, const char* assert_type, const char* display_type, const char* id,
+                            std::optional<std::span<const JSON::value_type>> guidance = std::nullopt) {
+        assert_raw_impl(cond, message, &details, class_name, function_name, file_name, line, column,
+                        hit, must_hit, assert_type, display_type, id, guidance);
+    }
+
+    inline void assert_raw(bool cond, const char* message,
+                            const char* class_name, const char* function_name, const char* file_name, const int line, const int column,
+                            bool hit, bool must_hit, const char* assert_type, const char* display_type, const char* id,
+                            std::optional<std::span<const JSON::value_type>> guidance = std::nullopt) {
+        assert_raw_impl(cond, message, nullptr, class_name, function_name, file_name, line, column,
+                        hit, must_hit, assert_type, display_type, id, guidance);
     }
 
     struct Assertion {
@@ -567,31 +776,58 @@ namespace antithesis::internal::assertions {
             const char* assert_type = get_assert_type_string(type);
             const bool must_hit = get_must_hit(type);
             const char* display_type = get_display_type_string(type);
-            assert_impl(condition, message, {}, location, hit, must_hit, assert_type, display_type, id.c_str());
+            assert_impl(condition, message, nullptr, location, hit, must_hit, assert_type, display_type, id.c_str());
         }
 
-        [[clang::always_inline]] inline void check_assertion(auto&& cond, const JSON& details)
+        using Fields = std::initializer_list<JSON::value_type>;
+        using AdditionalFields = std::span<const JSON::value_type>;
+
+        [[clang::always_inline]] inline void check_assertion(auto&& cond)
             requires requires { static_cast<bool>(std::forward<decltype(cond)>(cond)); } {
-            #if defined(NO_ANTITHESIS_SDK)
-              #error "Antithesis SDK has been disabled"
-            #endif
-            if (__builtin_expect(state.false_not_seen.load(std::memory_order_relaxed)
-                    || state.true_not_seen.load(std::memory_order_relaxed), false)) {
-                check_assertion_internal(static_cast<bool>(std::forward<decltype(cond)>(cond)), details);
-            }
+            check_assertion_with_details(std::forward<decltype(cond)>(cond), nullptr, {}, {}, false);
+        }
+
+        [[clang::always_inline]] inline void check_assertion(auto&& cond, const JSON& details, Fields additional = {})
+            requires requires { static_cast<bool>(std::forward<decltype(cond)>(cond)); } {
+            check_assertion_with_details(std::forward<decltype(cond)>(cond), &details, {}, {additional.begin(), additional.size()}, true);
+        }
+
+        [[clang::always_inline]] inline void check_assertion(auto&& cond, Fields details, Fields additional = {})
+            requires requires { static_cast<bool>(std::forward<decltype(cond)>(cond)); } {
+            check_assertion_with_details(std::forward<decltype(cond)>(cond), nullptr, details, {additional.begin(), additional.size()}, true);
+        }
+
+        [[clang::always_inline]] inline void check_assertion(auto&& cond, Fields details,
+                const std::vector<JSON::value_type>& additional)
+            requires requires { static_cast<bool>(std::forward<decltype(cond)>(cond)); } {
+            check_assertion_with_details(std::forward<decltype(cond)>(cond), nullptr, details, additional, true);
         }
 
         private:
-        void check_assertion_internal(bool cond, const JSON& details) {
+        // Borrowed fields are consumed synchronously, and only when emitting.
+        [[clang::always_inline]] inline void check_assertion_with_details(auto&& cond, const JSON* object,
+                Fields fields, AdditionalFields additional, bool present) {
+            if (__builtin_expect(state.false_not_seen.load(std::memory_order_relaxed)
+                    || state.true_not_seen.load(std::memory_order_relaxed), false)) {
+                check_assertion_internal(static_cast<bool>(std::forward<decltype(cond)>(cond)),
+                    object, fields, additional, present);
+            }
+        }
+
+        void check_assertion_internal(bool cond, const JSON* object, Fields fields, AdditionalFields additional, bool present) {
             // exchange() rather than read-then-write: exactly one of any
             // racing first evaluations wins each flag, so an assertion
-            // cannot emit twice for one condition.
+            // cannot emit twice for one condition. The plain load in front
+            // only skips the atomic store once the flag is already spent,
+            // so repeated calls don't keep dirtying the cache line.
             bool emit = false;
-            if (!cond && state.false_not_seen.exchange(false, std::memory_order_relaxed)) {
+            if (!cond && state.false_not_seen.load(std::memory_order_relaxed)
+                      && state.false_not_seen.exchange(false, std::memory_order_relaxed)) {
                 emit = true;
             }
 
-            if (cond && state.true_not_seen.exchange(false, std::memory_order_relaxed)) {
+            if (cond && state.true_not_seen.load(std::memory_order_relaxed)
+                     && state.true_not_seen.exchange(false, std::memory_order_relaxed)) {
                 emit = true;
             }
 
@@ -600,8 +836,9 @@ namespace antithesis::internal::assertions {
                 const char* assert_type = get_assert_type_string(type);
                 const bool must_hit = get_must_hit(type);
                 const char* display_type = get_display_type_string(type);
-                std::string id = make_key(message, location);
-                assert_impl(cond, message, details, location, hit, must_hit, assert_type, display_type, id.c_str());
+                json::ObjectView details{object, {fields.begin(), fields.size()}, additional};
+                assert_impl(cond, message, present ? &details : nullptr, location,
+                    hit, must_hit, assert_type, display_type, message);
             }
         }
     };
@@ -639,6 +876,102 @@ namespace antithesis::internal::assertions {
         }
     }
 
+    inline constexpr double unset_extreme_gap() {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    inline constexpr bool guidance_improves(double gap, double current, GuidepostType type) {
+        if (current != current) {
+            return true;
+        }
+        return type == GUIDEPOST_MAXIMIZE ? gap > current : gap < current;
+    }
+
+    template <typename NumericValue>
+    inline constexpr double numeric_gap(NumericValue left, NumericValue right) {
+        return static_cast<double>(left) - static_cast<double>(right);
+    }
+
+    template<typename T>
+    void emit_guidance(const char* id, const char* message, const LocationInfo& location, GuidepostType type, const T* data) {
+        if constexpr (std::is_same_v<T, JSON>) {
+            if (data != nullptr) output_details_warnings(*data, id);
+        }
+        get_lib_handler().output_json([&](std::ostream& out) {
+            json::write_object(out, [&](auto& event) {
+                event.field("antithesis_guidance", [&](std::ostream& out) {
+                    json::write_object(out, [&](auto& guidance) {
+                        if (data != nullptr) guidance.field("guidance_data", *data);
+                        guidance.field("guidance_type", get_guidance_type_string(type));
+                        guidance.field("hit", data != nullptr);
+                        guidance.field("id", id);
+                        guidance.field("location", [&](std::ostream& out) { location.write_json(out); });
+                        guidance.field("maximize", does_guidance_maximize(type));
+                        guidance.field("message", message);
+                    });
+                });
+            });
+        });
+    }
+
+    struct TrackedGuidance {
+        std::atomic<double> extreme_gap{unset_extreme_gap()};
+    };
+
+    inline TrackedGuidance& tracked_guidance(const std::string& id) {
+        [[clang::no_destroy]] static std::mutex mutex;
+        [[clang::no_destroy]] static std::unordered_map<std::string, TrackedGuidance> tracker;
+        std::lock_guard<std::mutex> lock(mutex);
+        return tracker[id];
+    }
+
+    inline bool raw_guidance_gate(const char* id, GuidepostType type, double gap) {
+        TrackedGuidance& gate = tracked_guidance(id);
+        double current = gate.extreme_gap.load(std::memory_order_relaxed);
+        while (guidance_improves(gap, current, type)) {
+            if (gate.extreme_gap.compare_exchange_weak(
+                    current, gap, std::memory_order_relaxed, std::memory_order_relaxed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // These are low-level functions designed to be used by third-party
+    // frameworks. Regular users of the SDK should use the guidance macros.
+
+    template <typename NumericValue>
+    inline void numeric_guidance_raw(NumericValue left, NumericValue right,
+                            const char* class_name, const char* function_name, const char* file_name, const int line, const int column,
+                            const char* id, const char* message, GuidepostType type, bool hit) {
+        LocationInfo location{ class_name, function_name, file_name, line, column };
+        if (!hit) {
+            emit_guidance<JSON>(id, message, location, type, nullptr);
+            return;
+        }
+        if (!std::isfinite(left) || !std::isfinite(right)) {
+            output_non_finite_guidance_warning(id);
+            return;
+        }
+        if (!raw_guidance_gate(id, type, numeric_gap(left, right))) {
+            return;
+        }
+        JSON data{{"left", left}, {"right", right}};
+        emit_guidance(id, message, location, type, &data);
+    }
+
+    inline void boolean_guidance_raw(const JSON& data,
+                            const char* class_name, const char* function_name, const char* file_name, const int line, const int column,
+                            const char* id, const char* message, GuidepostType type, bool hit) {
+        LocationInfo location{ class_name, function_name, file_name, line, column };
+        // Boolean guidance is never gated
+        if (!hit) {
+            emit_guidance<JSON>(id, message, location, type, nullptr);
+            return;
+        }
+        emit_guidance(id, message, location, type, &data);
+    }
+
     template <typename NumericValue, class Value=std::pair<NumericValue, NumericValue>>
     struct NumericGuidepost {
         const char* message;
@@ -650,62 +983,33 @@ namespace antithesis::internal::assertions {
         NumericGuidepost(const char* message, LocationInfo&& location, GuidepostType type) :
             message(message), location(std::move(location)), type(type) {
                 this->add_to_catalog();
-                if (type == GUIDEPOST_MAXIMIZE) {
-                    extreme_gap = -1.0 * std::numeric_limits<double>::max();
-                } else {
-                    extreme_gap = std::numeric_limits<double>::max();
-                }
+                extreme_gap = unset_extreme_gap();
             }
 
         inline void add_to_catalog() {
-            std::string id = make_key(message, location);
-            JSON catalog{
-                {"antithesis_guidance", JSON{
-                    {"guidance_type", get_guidance_type_string(type)},
-                    {"message", message},
-                    {"id", id},
-                    {"location", location.to_json()},
-                    {"maximize", does_guidance_maximize(type)},
-                    {"hit", false}
-                }}
-            };
-            get_lib_handler().output(catalog);
+            emit_guidance<JSON>(message, message, location, type, nullptr);
         }
 
         bool should_send_value(double gap) {
-            double current = extreme_gap.load(std::memory_order_relaxed);
-            if (this->type == GUIDEPOST_MAXIMIZE) {
-                return gap > current;
-            } else {
-                return gap < current;
-            }
+            return guidance_improves(gap, extreme_gap.load(std::memory_order_relaxed), this->type);
         }
 
         [[clang::always_inline]] inline void send_guidance(Value value) {
-            double gap = static_cast<double>(value.first) - static_cast<double>(value.second);
+            if (!std::isfinite(value.first) || !std::isfinite(value.second)) {
+                output_non_finite_guidance_warning(message);
+                return;
+            }
+            double gap = numeric_gap(value.first, value.second);
             if (!should_send_value(gap)) {
                 return;
             }
             std::lock_guard<std::mutex> lock(extreme_gap_mutex);
             if (should_send_value(gap)) {
                 extreme_gap.store(gap, std::memory_order_relaxed);
-                std::string id = make_key(this->message, this->location);
-                JSON guidance{
-                    {"antithesis_guidance", JSON{
-                        {"guidance_type", get_guidance_type_string(this->type)},
-                        {"message", this->message},
-                        {"id", id},
-                        {"location", this->location.to_json()},
-                        {"maximize", does_guidance_maximize(this->type)},
-                        {"guidance_data", JSON{ 
-                            { "left", value.first },    
-                            { "right", value.second } }},
-                        {"hit", true}
-                    }}
-                };
-                get_lib_handler().output(guidance);
+                JSON data{{"left", value.first}, {"right", value.second}};
+                emit_guidance(this->message, this->message, this->location, this->type, &data);
             }
-        }   
+        }
     };
 
     template <typename GuidanceType>
@@ -720,34 +1024,11 @@ namespace antithesis::internal::assertions {
             }
 
         inline void add_to_catalog() {
-            std::string id = make_key(message, location);
-            JSON catalog{
-                {"antithesis_guidance", JSON{
-                    {"guidance_type", get_guidance_type_string(type)},
-                    {"message", message},
-                    {"id", id},
-                    {"location", location.to_json()},
-                    {"maximize", does_guidance_maximize(type)},
-                    {"hit", false}
-                }}
-            };
-            get_lib_handler().output(catalog);
+            emit_guidance<JSON>(message, message, location, type, nullptr);
         }
 
-        inline virtual void send_guidance(GuidanceType data) {
-            std::string id = make_key(this->message, this->location);
-            JSON guidance{
-                {"antithesis_guidance", JSON{
-                    {"guidance_type", get_guidance_type_string(this->type)},
-                    {"message", this->message},
-                    {"id", id},
-                    {"location", location.to_json()},
-                    {"maximize", does_guidance_maximize(this->type)},
-                    {"guidance_data", data},
-                    {"hit", true}
-                }}
-            };
-            get_lib_handler().output(guidance);
+        inline virtual void send_guidance(const GuidanceType& data) {
+            emit_guidance(this->message, this->message, this->location, this->type, &data);
         }
     };
 }
@@ -927,7 +1208,7 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
         std::source_location::current().column() \
-    >::assertion.check_assertion(cond, (antithesis::JSON(__VA_ARGS__)) ) )
+    >::assertion.check_assertion(cond __VA_OPT__(, __VA_ARGS__)) )
 
 #define ALWAYS(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::ALWAYS_ASSERTION, cond, message, __VA_ARGS__)
 #define ALWAYS_OR_UNREACHABLE(cond, message, ...) ANTITHESIS_ASSERT_RAW(antithesis::internal::assertions::ALWAYS_OR_UNREACHABLE_ASSERTION, cond, message, __VA_ARGS__)
@@ -938,6 +1219,9 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 #define ANTITHESIS_NUMERIC_ASSERT_RAW(name, assertion_type, guidepost_type, left, cmp, right, message, ...) \
 do { \
     static_assert(std::is_same_v<decltype(left), decltype(right)>, "Values compared in " #name " must be of same type"); \
+    /* The generated {left,right} pair lands in check_assertion's `additional` slot when the \
+       caller passed details, and in the `details` slot otherwise; both serialize identically, \
+       with the generated keys overriding any user keys of the same name. */ \
     ANTITHESIS_ASSERT_RAW(assertion_type, left cmp right, message, __VA_ARGS__ __VA_OPT__(,) {{ "left", left }, { "right", right }} ); \
     antithesis::internal::NumericGuidanceCatalogEntry< \
         decltype(left), \
@@ -1014,6 +1298,9 @@ do { \
 #ifdef NO_ANTITHESIS_SDK
 
 namespace antithesis {
+    inline void setup_complete() {
+    }
+
     inline void setup_complete(const JSON& details) {
     }
 
@@ -1024,19 +1311,39 @@ namespace antithesis {
 #else
 
 namespace antithesis {
+    inline void setup_complete() {
+        internal::handlers::get_lib_handler().output_json([&](std::ostream& out) {
+            internal::json::write_object(out, [&](auto& event) {
+                event.field("antithesis_setup", [&](std::ostream& out) {
+                    internal::json::write_object(out, [&](auto& setup) {
+                        setup.field("status", "complete");
+                    });
+                });
+            });
+        });
+    }
+
     inline void setup_complete(const JSON& details) {
-        JSON json{ 
-            { "antithesis_setup", JSON{ 
-                {"status", "complete"}, 
-                {"details", details}
-            }} 
-        };
-        antithesis::internal::handlers::get_lib_handler().output(json);
+        internal::handlers::output_details_warnings(details, "setup_complete");
+        internal::handlers::get_lib_handler().output_json([&](std::ostream& out) {
+            internal::json::write_object(out, [&](auto& event) {
+                event.field("antithesis_setup", [&](std::ostream& out) {
+                    internal::json::write_object(out, [&](auto& setup) {
+                        setup.field("details", details);
+                        setup.field("status", "complete");
+                    });
+                });
+            });
+        });
     }
 
     inline void send_event(const char* name, const JSON& details) {
-        JSON json = { { name, details } };
-        antithesis::internal::handlers::get_lib_handler().output(json);
+        internal::handlers::output_details_warnings(details, name);
+        internal::handlers::get_lib_handler().output_json([&](std::ostream& out) {
+            internal::json::write_object(out, [&](auto& event) {
+                event.field(name, details);
+            });
+        });
     }
 }
 #endif
@@ -1073,6 +1380,7 @@ namespace antithesis {
     template <typename Iter>
     Iter random_choice(Iter begin, Iter end) {
         ssize_t num_things = end - begin;
+        // Returns end for an empty range, as std::max_element does.
         if (num_things == 0) {
             return end;
         }

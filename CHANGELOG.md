@@ -1,6 +1,20 @@
 # Changelog
 
+## 0.5.1 - 2026-10-21
+
+Non-finite floating-point values in emitted JSON are now written as the strings `"NaN"`, `"Infinity"` or `"-Infinity"`.
+
+Add `__sanitizer_cov_pcs_init` handler to support `-fsanitize-coverage=pc-table` builds.
+
 ## 0.5.0 - 2026-08-28
+
+Omitted assertion and setup details are now absent from emitted records; explicit
+`{}` remains an empty object. Add `setup_complete()` and an `assert_raw` overload
+without details.
+
+Assertion macros no longer construct a details map on every call. Emission borrows
+existing payloads and merges rich assertion fields without copying their values.
+Argument expressions are still evaluated on every call.
 
 Fix a number of small concurrency bugs found with TSAN.
 

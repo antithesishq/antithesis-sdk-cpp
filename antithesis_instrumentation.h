@@ -124,6 +124,17 @@ void __sanitizer_cov_trace_pc_guard( uint32_t *guard ) {
     }
     return;
 }
+
+// Binaries built with -fsanitize-coverage=pc-table also call this once per module, 
+// so the symbol needs to exist. We don't do anything with it dynamically though.
+extern
+#ifdef __cplusplus
+    "C"
+#endif
+void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg, const uintptr_t *pcs_end) {
+    (void)pcs_beg;
+    (void)pcs_end;
+}
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
