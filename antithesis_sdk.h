@@ -1035,6 +1035,8 @@ namespace antithesis::internal::assertions {
 
 namespace antithesis::internal {
 namespace { // Anonymous namespace which is translation-unit-specific; certain symbols aren't exposed in the symbol table as a result
+    enum msg_name_e { msg_name };
+
     template <std::size_t N>
     struct fixed_string {
         std::array<char, N> contents;
@@ -1044,8 +1046,17 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 
         #pragma clang diagnostic push
         #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
+
         constexpr fixed_string( const char (&arr)[N] )
         {
+            for(unsigned int i=0; i<N; i++) contents[i] = arr[i];
+        }
+
+        constexpr fixed_string( const char (&arr)[N], msg_name_e )
+        {
+#ifdef ANTITHESIS_MAX_NAME_LEN
+            static_assert(N <= ANTITHESIS_MAX_NAME_LEN + 1);
+#endif
             for(unsigned int i=0; i<N; i++) contents[i] = arr[i];
         }
 
@@ -1062,6 +1073,9 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 
     template <std::size_t N>
     fixed_string( const char (&arr)[N] ) -> fixed_string<N>;
+
+    template <std::size_t N>
+    fixed_string( const char (&arr)[N], msg_name_e ) -> fixed_string<N>;
 
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
@@ -1203,7 +1217,7 @@ namespace { // Anonymous namespace which is translation-unit-specific; certain s
 #define ANTITHESIS_ASSERT_RAW(type, cond, message, ...) ( \
     antithesis::internal::CatalogEntry< \
         type, \
-        antithesis::internal::fixed_string(message), \
+        antithesis::internal::fixed_string(message, antithesis::internal::msg_name), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
@@ -1226,7 +1240,7 @@ do { \
     antithesis::internal::NumericGuidanceCatalogEntry< \
         decltype(left), \
         guidepost_type, \
-        antithesis::internal::fixed_string(message), \
+        antithesis::internal::fixed_string(message, antithesis::internal::msg_name), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
@@ -1262,7 +1276,7 @@ do { \
     antithesis::internal::BooleanGuidanceCatalogEntry< \
         antithesis::JSON, \
         antithesis::internal::assertions::GUIDEPOST_NONE, \
-        antithesis::internal::fixed_string(message), \
+        antithesis::internal::fixed_string(message, antithesis::internal::msg_name), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
@@ -1281,7 +1295,7 @@ do { \
     antithesis::internal::BooleanGuidanceCatalogEntry< \
         antithesis::JSON, \
         antithesis::internal::assertions::GUIDEPOST_ALL, \
-        antithesis::internal::fixed_string(message), \
+        antithesis::internal::fixed_string(message, antithesis::internal::msg_name), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().file_name()), \
         FIXED_STRING_FROM_C_STR(std::source_location::current().function_name()), \
         std::source_location::current().line(), \
